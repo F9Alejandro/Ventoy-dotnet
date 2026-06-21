@@ -1,0 +1,26 @@
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Visual Studio / Rider / VS Code cache and user settings
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# dotnet build artifacts
+bin/
+obj/
+publish/
+
+# Local/Agent tools
+.agents/
+recommended_tools.json
+
+# Temporary/External build directories we don't want to commit
+# If ntfs-3g source directory contains build artifacts, it is best to gitignore it
+# and keep the clean archive, or keep its source clean. Let's ignore the compiled folder:
+ntfs-3g_ntfsprogs-2022.10.3/
