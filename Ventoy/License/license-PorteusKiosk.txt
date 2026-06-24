@@ -1,3 +1,0 @@
-Porteus Kiosk follows GPL license (see gpl-3.0.txt)
-
-Ventoy does not modify its source code, only its library is used.

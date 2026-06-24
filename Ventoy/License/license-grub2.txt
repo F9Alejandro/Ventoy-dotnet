@@ -1,3 +1,0 @@
-GRUB2 follows GPLv3+ license (see gpl-3.0.txt)
-Ventoy modify its source code, these code modified by Ventoy follow the same license as grub2.
-

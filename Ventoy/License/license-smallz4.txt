@@ -1,4 +1,0 @@
-smalLz4 follows MIT license (see MIT.txt)
-
-Ventoy does not modify its source code, only its binary is used.
-

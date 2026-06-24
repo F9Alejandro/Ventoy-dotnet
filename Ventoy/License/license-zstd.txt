@@ -1,3 +1,0 @@
-zstd follows the BSD License (see BSD.txt)
-
-Ventoy does not modify its source code, only its binrary is used.
