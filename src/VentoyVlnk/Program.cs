@@ -5,7 +5,7 @@ using System.Text;
 
 namespace VentoyVlnk
 {
-    class Program
+    public class Program
     {
         // VENTOY_GUID bytes: "  www.ventoy.net"
         private static readonly byte[] VentoyGuidBytes = Encoding.ASCII.GetBytes("  www.ventoy.net");
@@ -179,7 +179,7 @@ namespace VentoyVlnk
             Array.Copy(bytes, 0, buffer, offset, 8);
         }
 
-        private static bool IsSupportedImgSuffix(string filePath)
+        public static bool IsSupportedImgSuffix(string filePath)
         {
             string ext = Path.GetExtension(filePath).ToLowerInvariant();
             string[] suffixes = { ".iso", ".img", ".wim", ".efi", ".vhd", ".vhdx", ".dat", ".vtoy" };
@@ -277,7 +277,7 @@ namespace VentoyVlnk
         }
 
         // Platform-specific Disk Signature and Partition Offset Resolution
-        private static bool ResolveWindowsPath(string filePath, out string diskDevice, out ulong partOffsetBytes, out string relPath)
+        public static bool ResolveWindowsPath(string filePath, out string diskDevice, out ulong partOffsetBytes, out string relPath)
         {
             diskDevice = string.Empty;
             partOffsetBytes = 0;
@@ -337,7 +337,7 @@ namespace VentoyVlnk
             return true;
         }
 
-        private static bool ResolveLinuxPath(string filePath, out string diskDevice, out ulong partOffsetBytes, out string relPath)
+        public static bool ResolveLinuxPath(string filePath, out string diskDevice, out ulong partOffsetBytes, out string relPath)
         {
             diskDevice = string.Empty;
             partOffsetBytes = 0;
@@ -448,7 +448,7 @@ namespace VentoyVlnk
             return true;
         }
 
-        private static bool GetDiskSignature(string diskDevice, out uint signature)
+        public static bool GetDiskSignature(string diskDevice, out uint signature)
         {
             signature = 0;
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))

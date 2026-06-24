@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ventoy2DiskDotNet", "src\Ve
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VentoyVlnk", "src\VentoyVlnk\VentoyVlnk.csproj", "{47F0857D-AA5C-4BB2-AA1D-EA632F3537AE}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ventoy2DiskAvalonia", "src\Ventoy2DiskAvalonia\Ventoy2DiskAvalonia.csproj", "{DD8C4216-3747-49D0-BCAF-3B7EDC0C8A7B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -26,9 +28,14 @@ Global
 		{47F0857D-AA5C-4BB2-AA1D-EA632F3537AE}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{47F0857D-AA5C-4BB2-AA1D-EA632F3537AE}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{47F0857D-AA5C-4BB2-AA1D-EA632F3537AE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DD8C4216-3747-49D0-BCAF-3B7EDC0C8A7B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DD8C4216-3747-49D0-BCAF-3B7EDC0C8A7B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DD8C4216-3747-49D0-BCAF-3B7EDC0C8A7B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DD8C4216-3747-49D0-BCAF-3B7EDC0C8A7B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{DD041D58-BD8E-4861-9869-372FA918B87B} = {6E727552-9237-4E3C-BC2B-2CD4ADA1493E}
 		{47F0857D-AA5C-4BB2-AA1D-EA632F3537AE} = {6E727552-9237-4E3C-BC2B-2CD4ADA1493E}
+		{DD8C4216-3747-49D0-BCAF-3B7EDC0C8A7B} = {6E727552-9237-4E3C-BC2B-2CD4ADA1493E}
 	EndGlobalSection
 EndGlobal

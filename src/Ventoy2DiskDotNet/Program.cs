@@ -12,7 +12,7 @@ using Microsoft.Extensions.FileProviders;
 
 namespace Ventoy2DiskDotNet
 {
-    class Program
+    public class Program
     {
         private static string _curServerToken = Guid.NewGuid().ToString("n");
         private static string _curLanguage = "en-US";
@@ -24,6 +24,12 @@ namespace Ventoy2DiskDotNet
         private static string _processType = string.Empty; // "install", "update", "clean"
         private static string _processResult = "success"; // "success", "failed"
         private static readonly object _progressLock = new object();
+
+        public static int Percent { get { lock (_progressLock) { return _percent; } } }
+        public static string ProcessDisk { get { lock (_progressLock) { return _processDisk; } } }
+        public static string ProcessType { get { lock (_progressLock) { return _processType; } } }
+        public static string ProcessResult { get { lock (_progressLock) { return _processResult; } } }
+        public static object ProgressLock => _progressLock;
 
         // Plugson settings
         private static string _plugsonMountPoint = string.Empty;
@@ -118,7 +124,7 @@ namespace Ventoy2DiskDotNet
         }
 
         // Linux device detection
-        private static List<DiskInfo> GetLinuxDisks(bool showAll)
+        public static List<DiskInfo> GetLinuxDisks(bool showAll)
         {
             var list = new List<DiskInfo>();
             try
@@ -286,7 +292,7 @@ namespace Ventoy2DiskDotNet
         }
 
         // Windows device detection
-        private static List<DiskInfo> GetWindowsDisks(bool showAll)
+        public static List<DiskInfo> GetWindowsDisks(bool showAll)
         {
             var list = new List<DiskInfo>();
             if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return list;
@@ -412,7 +418,7 @@ namespace Ventoy2DiskDotNet
             }
         }
 
-        private static string GetVentoyVersion()
+        public static string GetVentoyVersion()
         {
             try
             {
@@ -455,7 +461,7 @@ namespace Ventoy2DiskDotNet
         }
 
         // Install / Update / Clean subprocess execution
-        private static void StartBackgroundOperation(string type, string diskName, int style, int secureBoot, string reserveSpace, string fsType)
+        public static void StartBackgroundOperation(string type, string diskName, int style, int secureBoot, string reserveSpace, string fsType)
         {
             lock (_progressLock)
             {

@@ -1,0 +1,178 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:Ventoy2DiskAvalonia"
+        mc:Ignorable="d" d:DesignWidth="500" d:DesignHeight="420"
+        x:Class="Ventoy2DiskAvalonia.MainWindow"
+        Title="Ventoy DotNet - Universal Installer &amp; Utilities"
+        Width="500" Height="420" CanResize="True" MinWidth="500" MinHeight="420"
+        WindowStartupLocation="CenterScreen"
+        Background="#F4F6F9"
+        FontFamily="Inter, Roboto, sans-serif">
+
+    <Panel>
+        <TabControl>
+            <!-- TAB 1: VENTOY2DISK INSTALLER -->
+            <TabItem Header="Ventoy2Disk Installer">
+                <DockPanel>
+                    <!-- Menu Bar at the top -->
+                    <Menu DockPanel.Dock="Top" Background="#E5EAEF">
+                        <MenuItem Header="Option">
+                            <MenuItem Header="Secure Boot Support" x:Name="MenuSecureBoot" ToggleType="CheckBox" Click="OnOptionChanged"/>
+                            <MenuItem Header="Partition Style">
+                                <MenuItem Header="MBR" x:Name="MenuMBR" ToggleType="Radio" GroupName="PartStyle" IsChecked="True" Click="OnOptionChanged"/>
+                                <MenuItem Header="GPT" x:Name="MenuGPT" ToggleType="Radio" GroupName="PartStyle" Click="OnOptionChanged"/>
+                            </MenuItem>
+                            <Separator/>
+                            <MenuItem Header="Clear Ventoy" Click="OnClearVentoy"/>
+                        </MenuItem>
+                    </Menu>
+
+                    <Grid Margin="20" RowDefinitions="Auto,Auto,*,Auto">
+                        <!-- 1. Device Selection Row -->
+                        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,15">
+                            <ComboBox Grid.Column="0" x:Name="DeviceComboBox" HorizontalAlignment="Stretch" SelectionChanged="OnDeviceSelectionChanged">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate x:DataType="local:DiskComboBoxItem">
+                                        <TextBlock Text="{Binding Description}"/>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                            <Button Grid.Column="1" Content="Refresh" Margin="10,0,0,0" Click="OnRefreshClick"/>
+                        </Grid>
+
+                        <!-- 2. Version Display Grid -->
+                        <Border Grid.Row="1" Background="White" BorderBrush="#D0D5DD" BorderThickness="1" CornerRadius="8" Padding="15" Margin="0,0,0,15">
+                            <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto">
+                                <!-- Column 0: In Device -->
+                                <StackPanel Grid.Column="0" Grid.Row="0" HorizontalAlignment="Center" Margin="0,0,0,10">
+                                    <TextBlock Text="Ventoy In Device" FontSize="11" Foreground="#667085" HorizontalAlignment="Center"/>
+                                    <TextBlock x:Name="DeviceVersionText" Text="None" FontSize="20" FontWeight="Bold" Foreground="#344054" HorizontalAlignment="Center" Margin="0,5,0,0"/>
+                                </StackPanel>
+
+                                <!-- Column 1: In Package -->
+                                <StackPanel Grid.Column="1" Grid.Row="0" HorizontalAlignment="Center" Margin="0,0,0,10">
+                                    <TextBlock Text="Ventoy In Package" FontSize="11" Foreground="#667085" HorizontalAlignment="Center"/>
+                                    <TextBlock x:Name="PackageVersionText" Text="1.1.12" FontSize="20" FontWeight="Bold" Foreground="#344054" HorizontalAlignment="Center" Margin="0,5,0,0"/>
+                                </StackPanel>
+
+                                <!-- Row 1: Configurations -->
+                                <StackPanel Grid.Column="0" Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center">
+                                    <TextBlock Text="Style: " FontSize="11" Foreground="#667085"/>
+                                    <TextBlock x:Name="DeviceStyleText" Text="MBR" FontSize="11" FontWeight="Bold" Foreground="#344054"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center">
+                                    <TextBlock Text="Secure Boot: " FontSize="11" Foreground="#667085"/>
+                                    <TextBlock x:Name="DeviceSecureText" Text="No" FontSize="11" FontWeight="Bold" Foreground="#344054"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <!-- 3. Progress and Status Section -->
+                        <StackPanel Grid.Row="2" VerticalAlignment="Center" Margin="0,0,0,15">
+                            <ProgressBar x:Name="OpProgressBar" Height="15" Minimum="0" Maximum="100" Value="100" HorizontalAlignment="Stretch"/>
+                            <TextBlock x:Name="StatusText" Text="Ready" FontSize="12" Foreground="#475467" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+                        </StackPanel>
+
+                        <!-- 4. Action Buttons -->
+                        <Grid Grid.Row="3" ColumnDefinitions="*,*">
+                            <Button Grid.Column="0" x:Name="InstallButton" Content="Install" Background="#D92D20" Foreground="White" FontWeight="Bold" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Padding="0,10,0,10" Margin="0,0,10,0" Click="OnInstallClick"/>
+                            <Button Grid.Column="1" x:Name="UpdateButton" Content="Update" Background="#079455" Foreground="White" FontWeight="Bold" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Padding="0,10,0,10" Margin="10,0,0,0" Click="OnUpdateClick"/>
+                        </Grid>
+                    </Grid>
+                </DockPanel>
+            </TabItem>
+
+            <!-- TAB 2: VLNK VIRTUAL LINK CREATOR -->
+            <TabItem Header="Virtual Link (Vlnk) Creator">
+                <ScrollViewer Margin="20">
+                    <StackPanel Spacing="15">
+                        <TextBlock Text="Create a Virtual Link file (.vlnk) to boot images from other partition/disk targets." FontSize="12" Foreground="#667085"/>
+
+                        <!-- Source File Selection -->
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="Source Image File:" FontWeight="SemiBold" FontSize="12"/>
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBox Grid.Column="0" x:Name="VlnkSourceTextBox" PlaceholderText="e.g. C:\iso\ubuntu.iso or /mnt/data/ubuntu.iso"/>
+                                <Button Grid.Column="1" Content="Browse..." Margin="10,0,0,0" Click="OnVlnkSourceBrowseClick"/>
+                            </Grid>
+                        </StackPanel>
+
+                        <!-- Target Parameters (Auto-Resolved) -->
+                        <Border Background="White" BorderBrush="#D0D5DD" BorderThickness="1" CornerRadius="8" Padding="15">
+                            <StackPanel Spacing="10">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <TextBlock Grid.Column="0" Text="Partition &amp; Disk Resolution" FontWeight="Bold" FontSize="13" VerticalAlignment="Center"/>
+                                    <Button Grid.Column="1" Content="Auto-Resolve" Click="OnVlnkResolveClick"/>
+                                </Grid>
+                                
+                                <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto" Margin="0,5,0,0">
+                                    <TextBlock Grid.Column="0" Grid.Row="0" Text="Target Disk:" FontSize="12" Foreground="#667085" Width="140"/>
+                                    <TextBlock Grid.Column="1" Grid.Row="0" x:Name="VlnkResolvedDiskText" Text="Not resolved" FontSize="12" FontWeight="SemiBold"/>
+
+                                    <TextBlock Grid.Column="0" Grid.Row="1" Text="Partition Offset (bytes):" FontSize="12" Foreground="#667085" Margin="0,5,0,0"/>
+                                    <TextBlock Grid.Column="1" Grid.Row="1" x:Name="VlnkResolvedOffsetText" Text="Not resolved" FontSize="12" FontWeight="SemiBold" Margin="0,5,0,0"/>
+
+                                    <TextBlock Grid.Column="0" Grid.Row="2" Text="Disk Signature:" FontSize="12" Foreground="#667085" Margin="0,5,0,0"/>
+                                    <TextBlock Grid.Column="1" Grid.Row="2" x:Name="VlnkResolvedSigText" Text="Not resolved" FontSize="12" FontWeight="SemiBold" Margin="0,5,0,0"/>
+                                </Grid>
+
+                                <Separator Height="1" Background="#EAECF0" Margin="0,5,0,5"/>
+
+                                <CheckBox x:Name="VlnkManualOverrideCheck" Content="Manual Override (Advanced)" IsCheckedChanged="OnVlnkManualCheckChanged"/>
+
+                                <StackPanel x:Name="VlnkManualInputs" Spacing="8" IsVisible="False">
+                                    <Grid ColumnDefinitions="140,*">
+                                        <TextBlock Grid.Column="0" Text="Disk Device Path:" VerticalAlignment="Center" FontSize="12"/>
+                                        <TextBox Grid.Column="1" x:Name="VlnkManualDiskTextBox" PlaceholderText="e.g. /dev/sdb or \\.\PhysicalDrive1" FontSize="12"/>
+                                    </Grid>
+                                    <Grid ColumnDefinitions="140,*">
+                                        <TextBlock Grid.Column="0" Text="Partition Start (sectors):" VerticalAlignment="Center" FontSize="12"/>
+                                        <TextBox Grid.Column="1" x:Name="VlnkManualOffsetTextBox" PlaceholderText="e.g. 2048" FontSize="12"/>
+                                    </Grid>
+                                    <Grid ColumnDefinitions="140,*">
+                                        <TextBlock Grid.Column="0" Text="Disk MBR Signature (hex):" VerticalAlignment="Center" FontSize="12"/>
+                                        <TextBox Grid.Column="1" x:Name="VlnkManualSigTextBox" PlaceholderText="e.g. A1B2C3D4" FontSize="12"/>
+                                    </Grid>
+                                    <Grid ColumnDefinitions="140,*">
+                                        <TextBlock Grid.Column="0" Text="Relative Path in Partition:" VerticalAlignment="Center" FontSize="12"/>
+                                        <TextBox Grid.Column="1" x:Name="VlnkManualRelPathTextBox" PlaceholderText="e.g. /iso/ubuntu.iso" FontSize="12"/>
+                                    </Grid>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Destination File Selection -->
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="Output Virtual Link File (.vlnk):" FontWeight="SemiBold" FontSize="12"/>
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBox Grid.Column="0" x:Name="VlnkDestTextBox" PlaceholderText="e.g. D:\ubuntu.vlnk.iso"/>
+                                <Button Grid.Column="1" Content="Browse..." Margin="10,0,0,0" Click="OnVlnkDestBrowseClick"/>
+                            </Grid>
+                        </StackPanel>
+
+                        <!-- Generate Button -->
+                        <Button Content="Generate Virtual Link" Background="#1570EF" Foreground="White" FontWeight="Bold" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Padding="0,10,0,10" Click="OnGenerateVlnkClick"/>
+
+                        <TextBlock x:Name="VlnkStatusText" Text="Ready" FontSize="12" Foreground="#475467" HorizontalAlignment="Center" Margin="0,5,0,0"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+
+        <!-- Modal Overlay for Confirmation (Remains same, centered overlay) -->
+        <Grid x:Name="ModalOverlay" Background="#80000000" IsVisible="False" VerticalAlignment="Stretch" HorizontalAlignment="Stretch">
+            <Border Background="White" CornerRadius="12" Padding="20" Width="340" VerticalAlignment="Center" HorizontalAlignment="Center" BorderBrush="#D0D5DD" BorderThickness="1">
+                <StackPanel Spacing="15">
+                    <TextBlock Text="Warning" FontSize="16" FontWeight="Bold" Foreground="#D92D20"/>
+                    <TextBlock x:Name="ModalMessageText" Text="All data on this device will be lost!" TextWrapping="Wrap" FontSize="13" Foreground="#344054"/>
+                    <Grid ColumnDefinitions="*,*">
+                        <Button Grid.Column="0" Content="No" Click="OnModalNoClick" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Background="#F2F4F7" Foreground="#344054" Margin="0,0,5,0"/>
+                        <Button Grid.Column="1" Content="Yes" Click="OnModalYesClick" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Background="#D92D20" Foreground="White" Margin="5,0,0,0"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Panel>
+</Window>
