@@ -558,6 +558,10 @@ namespace Ventoy2DiskDotNet
                     {
                         try
                         {
+                            if (diskName.StartsWith("/dev/"))
+                            {
+                                diskName = diskName.Substring(5);
+                            }
                             string diskPath = $"/dev/{diskName}";
                             if (!File.Exists(diskPath))
                             {
@@ -1347,6 +1351,103 @@ namespace Ventoy2DiskDotNet
             string hostIp = "127.0.0.1";
             int port = 24680;
 
+            if (args.Length > 0 && args[0].StartsWith("-"))
+            {
+                // CLI mode compatibility with Ventoy2Disk.sh/VentoyWorker.sh
+                string cmd = args[0];
+                if (cmd == "-d")
+                {
+                    var disks = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? GetWindowsDisks(true) : GetLinuxDisks(true);
+                    Console.WriteLine("Devices List:");
+                    foreach (var d in disks)
+                    {
+                        Console.WriteLine($"  Device: {d.Name} ({d.Model}), Size: {d.HumanSize}, Ventoy: {(string.IsNullOrEmpty(d.VtoyVer) ? "None" : d.VtoyVer)}");
+                    }
+                    return;
+                }
+
+                string type = "";
+                if (cmd.Equals("-i", StringComparison.OrdinalIgnoreCase) || cmd.Equals("-I")) type = "install";
+                else if (cmd.Equals("-u", StringComparison.OrdinalIgnoreCase)) type = "update";
+                else if (cmd.Equals("-c", StringComparison.OrdinalIgnoreCase)) type = "clean";
+                else
+                {
+                    Console.WriteLine("Invalid command. Use -i, -I, -u, -c, or -d.");
+                    return;
+                }
+
+                if (args.Length < 2)
+                {
+                    Console.WriteLine("Missing disk device parameter.");
+                    return;
+                }
+
+                string disk = args[args.Length - 1];
+                if (disk.StartsWith("-"))
+                {
+                    Console.WriteLine("Missing disk device parameter.");
+                    return;
+                }
+
+                int style = 0; // MBR
+                int secureBoot = 0; // disabled
+                string reserveSpace = "0";
+                string fsType = "exfat";
+
+                for (int i = 1; i < args.Length - 1; i++)
+                {
+                    if (args[i] == "-g") style = 1;
+                    else if (args[i] == "-s") secureBoot = 1;
+                    else if (args[i] == "-r" && i + 1 < args.Length - 1)
+                    {
+                        if (long.TryParse(args[i + 1], out long rsvMb))
+                        {
+                            reserveSpace = (rsvMb * 1024 * 1024).ToString(); // convert MB to Bytes
+                        }
+                        i++;
+                    }
+                }
+
+                if (cmd == "-i" || cmd == "-c")
+                {
+                    Console.Write($"WARNING: All data on {disk} will be lost! Continue? (y/n): ");
+                    var response = Console.ReadLine();
+                    if (response == null || !response.Trim().Equals("y", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Console.WriteLine("Aborted.");
+                        return;
+                    }
+                }
+
+                Console.WriteLine($"Starting {type} operation on {disk}...");
+                StartBackgroundOperation(type, disk, style, secureBoot, reserveSpace, fsType);
+
+                int lastPercent = -1;
+                while (true)
+                {
+                    int progressPercent;
+                    string res;
+                    lock (_progressLock)
+                    {
+                        progressPercent = _percent;
+                        res = _processResult;
+                    }
+                    if (progressPercent != lastPercent)
+                    {
+                        Console.Write($"\rProgress: {progressPercent}%   ");
+                        lastPercent = progressPercent;
+                    }
+                    if (progressPercent >= 100)
+                    {
+                        Console.WriteLine();
+                        Console.WriteLine(res == "success" ? "Operation completed successfully!" : "Operation failed.");
+                        break;
+                    }
+                    Thread.Sleep(200);
+                }
+                return;
+            }
+
             if (args.Length > 0)
             {
                 mode = args[0].ToLowerInvariant();
@@ -1367,6 +1468,7 @@ namespace Ventoy2DiskDotNet
             if (mode != "ventoy2disk" && mode != "plugson")
             {
                 Console.WriteLine("Usage: dotnet Ventoy2DiskDotNet.dll [ventoy2disk|plugson] [ip] [port] [mount_point]");
+                Console.WriteLine("Usage (CLI Mode): dotnet Ventoy2DiskDotNet.dll -i|-I|-u|-c|-d [options] <disk>");
                 return;
             }
 
