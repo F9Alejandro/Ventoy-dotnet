@@ -679,7 +679,7 @@ namespace Ventoy2DiskDotNet
                                 }
                                 else // GPT: run vtoycli gpt
                                 {
-                                    RunCommand(vtoycliPath, $"-f {diskPath}", out _, out _);
+                                    RunCommand(vtoycliPath, $"gpt -f {diskPath}", out _, out _);
                                 }
 
                                 // Trigger partition table reload
