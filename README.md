@@ -11,38 +11,77 @@ A cross-platform port of the Ventoy Windows installer (`Ventoy2Disk`) rebuilt fr
 
 ## Prerequisites
 
-- **.NET SDK 8.0**
+- **.NET SDK 8.0** (If the `dotnet` CLI is not in your system `PATH`, you can run it using its absolute path, e.g. `/root/.dotnet/dotnet`).
 - On **Linux**, administrative (`sudo`/`root`) privileges are required to write directly to block devices.
 - On **Windows**, the application must be run as **Administrator** to acquire raw handles to physical disks.
 
-## Usage
+## Compilation & Standalone Publishing
 
-### List Physical Drives
-To scan and list all available physical devices:
+You can build and publish standalone, self-contained binaries for Windows and Linux. This bundles the `.NET 8.0` runtime so the user does not need to have it installed.
+
+### Build standalone CLI:
 ```bash
-# On Linux (as root):
-/root/.dotnet/dotnet run --project src/Ventoy2DiskDotNet/Ventoy2DiskDotNet.csproj -- --list
+# For Linux x64
+dotnet publish src/Ventoy2DiskDotNet/Ventoy2DiskDotNet.csproj -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true
 
-# On Windows (as Administrator):
-dotnet run --project src/Ventoy2DiskDotNet/Ventoy2DiskDotNet.csproj -- --list
+# For Windows x64
+dotnet publish src/Ventoy2DiskDotNet/Ventoy2DiskDotNet.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 ```
 
-### Install Ventoy (Wipes Disk)
-To perform a clean installation of Ventoy onto a target device (MBR style with Secure Boot support enabled):
+### Build standalone GUI:
 ```bash
-/root/.dotnet/dotnet run --project src/Ventoy2DiskDotNet/Ventoy2DiskDotNet.csproj -- --install --device /dev/sdb --style MBR --secureboot yes
+# For Linux x64
+dotnet publish src/Ventoy2DiskAvalonia/Ventoy2DiskAvalonia.csproj -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true
+
+# For Windows x64
+dotnet publish src/Ventoy2DiskAvalonia/Ventoy2DiskAvalonia.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 ```
 
-To perform a clean GPT style installation with Secure Boot support disabled:
+## Running the Compiled Binaries
+
+Once compiled, navigate to the output `publish` folder (e.g. `src/Ventoy2DiskDotNet/bin/Release/net8.0/linux-x64/publish/` or `src/Ventoy2DiskAvalonia/bin/Release/net8.0/linux-x64/publish/`) to run the binaries.
+
+### Running the CLI
 ```bash
-/root/.dotnet/dotnet run --project src/Ventoy2DiskDotNet/Ventoy2DiskDotNet.csproj -- --install --device /dev/sdb --style GPT --secureboot no
+# List Physical Drives
+# Linux (as root):
+./Ventoy2DiskDotNet --list
+# Windows (as Administrator):
+Ventoy2DiskDotNet.exe --list
+
+# Clean Install Ventoy (Wipes Disk)
+# GPT Style, exFAT Filesystem, Secure Boot Disabled
+# Linux (as root):
+./Ventoy2DiskDotNet --install --device /dev/sdb --style GPT --secureboot no --filesystem exfat
+# Windows (as Administrator):
+Ventoy2DiskDotNet.exe --install --device 1 --style GPT --secureboot no --filesystem exfat
+
+# Update Ventoy (Preserves Partition 1 data files)
+# Linux (as root):
+./Ventoy2DiskDotNet --update --device /dev/sdb --secureboot yes
+# Windows (as Administrator):
+Ventoy2DiskDotNet.exe --update --device 1 --secureboot yes
 ```
 
-### Update Ventoy (Preserves Partition 1 Data)
-To update the Ventoy system files on a device without deleting your ISOs or personal data:
+### Running the GUI
 ```bash
-/root/.dotnet/dotnet run --project src/Ventoy2DiskDotNet/Ventoy2DiskDotNet.csproj -- --update --device /dev/sdb --secureboot yes
+# Linux (as root):
+./Ventoy2DiskAvalonia
+
+# Windows (as Administrator):
+Ventoy2DiskAvalonia.exe
 ```
+
+### Running via dotnet run (Development)
+You can also run directly from source using the .NET CLI:
+```bash
+# List physical drives
+dotnet run --project src/Ventoy2DiskDotNet/ -- --list
+
+# Launch Avalonia GUI
+dotnet run --project src/Ventoy2DiskAvalonia/
+```
+
 
 ## Structure
 
