@@ -280,6 +280,115 @@ namespace Ventoy2DiskDotNet
             return list;
         }
 
+        public static Stream OpenReadHandle(PhysicalDisk disk)
+        {
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                IntPtr hDisk = CreateFileA(disk.Path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
+                if (hDisk == INVALID_HANDLE_VALUE)
+                {
+                    int err = Marshal.GetLastWin32Error();
+                    throw new IOException($"Failed to open physical drive {disk.Path} for read. Win32 Error: {err}");
+                }
+                var safeHandle = new Microsoft.Win32.SafeHandles.SafeFileHandle(hDisk, true);
+                return new FileStream(safeHandle, FileAccess.Read);
+            }
+            else
+            {
+                return File.Open(disk.Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            }
+        }
+
+        public static (string version, bool secureBoot) DetectVentoyVersion(PhysicalDisk disk)
+        {
+            try
+            {
+                using (var stream = OpenReadHandle(disk))
+                {
+                    byte[] sector0 = new byte[512];
+                    if (stream.Read(sector0, 0, 512) != 512)
+                        return ("", false);
+
+                    if (sector0[510] != 0x55 || sector0[511] != 0xAA)
+                        return ("", false);
+
+                    bool isGpt = (sector0[446 + 4] == 0xEE);
+                    ulong part2StartSector = 0;
+                    if (!isGpt)
+                    {
+                        MbrHead mbr = MbrHead.Deserialize(sector0);
+                        if (mbr.PartTbl[1].FsFlag == 0xEF)
+                        {
+                            part2StartSector = mbr.PartTbl[1].StartSectorId;
+                        }
+                    }
+                    else
+                    {
+                        byte[] gptBytes = new byte[17408];
+                        stream.Position = 0;
+                        if (stream.Read(gptBytes, 0, 17408) != 17408)
+                            return ("", false);
+
+                        GptInfo gpt = new GptInfo();
+                        gpt.Mbr = MbrHead.Deserialize(gptBytes);
+                        gpt.Head = GptHeader.Deserialize(gptBytes.AsSpan(512, 512).ToArray());
+                        for (int i = 0; i < 128; i++)
+                        {
+                            gpt.PartTbl[i] = GptPartEntry.Deserialize(gptBytes, 1024 + (i * 128));
+                        }
+                        part2StartSector = gpt.PartTbl[1].StartLBA;
+                    }
+
+                    if (part2StartSector == 0)
+                        return ("", false);
+
+                    // Read the VTOYEFI FAT image (32MB)
+                    byte[] fatBytes = new byte[32 * 1024 * 1024];
+                    stream.Position = (long)(part2StartSector * 512);
+                    if (stream.Read(fatBytes, 0, fatBytes.Length) != fatBytes.Length)
+                        return ("", false);
+
+                    using (var fatStream = new MemoryStream(fatBytes))
+                    using (var fs = new DiscUtils.Fat.FatFileSystem(fatStream))
+                    {
+                        string version = "";
+                        bool secureBoot = false;
+
+                        if (fs.FileExists(@"grub\grub.cfg"))
+                        {
+                            using (var reader = new StreamReader(fs.OpenFile(@"grub\grub.cfg", FileMode.Open, FileAccess.Read)))
+                            {
+                                string content = reader.ReadToEnd();
+                                int index = content.IndexOf("VENTOY_VERSION=");
+                                if (index >= 0)
+                                {
+                                    int start = index + "VENTOY_VERSION=".Length;
+                                    if (start < content.Length && content[start] == '"') start++;
+                                    int end = start;
+                                    while (end < content.Length && content[end] != '"' && content[end] != '\r' && content[end] != '\n')
+                                    {
+                                        end++;
+                                    }
+                                    version = content.Substring(start, end - start);
+                                }
+                            }
+                        }
+
+                        if (fs.FileExists(@"EFI\BOOT\grubx64_real.efi"))
+                        {
+                            secureBoot = true;
+                        }
+
+                        return (version, secureBoot);
+                    }
+                }
+            }
+            catch
+            {
+                return ("", false);
+            }
+        }
+
         public static Stream OpenWriteHandle(PhysicalDisk disk)
         {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))

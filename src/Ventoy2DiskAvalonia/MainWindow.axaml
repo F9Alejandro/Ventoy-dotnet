@@ -1,0 +1,106 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="620" d:DesignHeight="600"
+        x:Class="Ventoy2DiskAvalonia.MainWindow"
+        Title="Ventoy C# Cross-Platform Installer"
+        Width="640" Height="620"
+        WindowStartupLocation="CenterScreen"
+        CanResize="False"
+        Background="#1E1E1E">
+
+    <Grid RowDefinitions="Auto, Auto, Auto, Auto, Auto, *, Auto" Margin="20">
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,20">
+            <TextBlock Text="Ventoy Installer" FontSize="26" FontWeight="Bold" Foreground="#007ACC" HorizontalAlignment="Center"/>
+            <TextBlock Text="Cross-Platform C# Edition" FontSize="12" Foreground="#888888" HorizontalAlignment="Center" Margin="0,2,0,0"/>
+        </StackPanel>
+
+        <!-- Device Selection -->
+        <Border Grid.Row="1" Background="#252526" CornerRadius="8" Padding="15" Margin="0,0,0,15">
+            <Grid ColumnDefinitions="*, Auto">
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Device" FontSize="14" FontWeight="SemiBold" Foreground="#FFFFFF" Margin="0,0,0,8"/>
+                    <ComboBox Name="DeviceComboBox" HorizontalAlignment="Stretch" MaxDropDownHeight="200">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}"/>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                </StackPanel>
+                <Button Grid.Column="1" Name="RefreshButton" Content="Refresh" Margin="15,22,0,0" Height="32" Width="80" 
+                        Background="#2D2D30" Foreground="#FFFFFF" VerticalAlignment="Bottom" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
+            </Grid>
+        </Border>
+
+        <!-- Version Status -->
+        <Grid Grid.Row="2" ColumnDefinitions="*, *" Margin="0,0,0,15">
+            <!-- Ventoy in Device -->
+            <Border Grid.Column="0" Background="#252526" CornerRadius="8" Padding="15" Margin="0,0,10,0">
+                <StackPanel HorizontalAlignment="Center">
+                    <TextBlock Text="Ventoy In Device" FontSize="12" Foreground="#888888" HorizontalAlignment="Center"/>
+                    <TextBlock Name="DeviceVersionLabel" Text="-" FontSize="20" FontWeight="Bold" Foreground="#FF5555" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Ventoy in Package -->
+            <Border Grid.Column="1" Background="#252526" CornerRadius="8" Padding="15" Margin="10,0,0,0">
+                <StackPanel HorizontalAlignment="Center">
+                    <TextBlock Text="Ventoy In Package" FontSize="12" Foreground="#888888" HorizontalAlignment="Center"/>
+                    <TextBlock Name="PackageVersionLabel" Text="1.1.15" FontSize="20" FontWeight="Bold" Foreground="#55FF55" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- Configuration Options -->
+        <Border Grid.Row="3" Background="#252526" CornerRadius="8" Padding="15" Margin="0,0,0,15">
+            <Grid ColumnDefinitions="*, *, *">
+                <!-- Partition Style -->
+                <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                    <TextBlock Text="Partition Style" FontSize="12" Foreground="#888888" Margin="0,0,0,8"/>
+                    <ComboBox Name="StyleComboBox" SelectedIndex="0" HorizontalAlignment="Stretch">
+                        <ComboBoxItem Content="MBR"/>
+                        <ComboBoxItem Content="GPT"/>
+                    </ComboBox>
+                </StackPanel>
+
+                <!-- Filesystem -->
+                <StackPanel Grid.Column="1" Margin="10,0,10,0">
+                    <TextBlock Text="Filesystem Type" FontSize="12" Foreground="#888888" Margin="0,0,0,8"/>
+                    <ComboBox Name="FsComboBox" SelectedIndex="0" HorizontalAlignment="Stretch">
+                        <ComboBoxItem Content="exFAT"/>
+                        <ComboBoxItem Content="NTFS"/>
+                    </ComboBox>
+                </StackPanel>
+
+                <!-- Secure Boot -->
+                <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="10,15,0,0">
+                    <CheckBox Name="SecureBootCheckBox" Content="Secure Boot" IsChecked="True" Foreground="#FFFFFF"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Actions -->
+        <Grid Grid.Row="4" ColumnDefinitions="*, *" Margin="0,0,0,15">
+            <Button Grid.Column="0" Name="InstallButton" Content="Install" Background="#8E1C1C" Foreground="#FFFFFF" 
+                    Height="40" Margin="0,0,10,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" FontSize="15" FontWeight="Bold"/>
+            <Button Grid.Column="1" Name="UpdateButton" Content="Update" Background="#1C5E8E" Foreground="#FFFFFF" 
+                    Height="40" Margin="10,0,0,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" FontSize="15" FontWeight="Bold"/>
+        </Grid>
+
+        <!-- Log Output Console -->
+        <Border Grid.Row="5" Background="#111111" CornerRadius="8" Padding="10" BorderBrush="#2D2D30" BorderThickness="1">
+            <ScrollViewer Name="LogScrollViewer">
+                <TextBlock Name="LogTextBlock" Text="System Ready." Foreground="#00FF00" FontSize="11" FontFamily="Consolas,Monospace" TextWrapping="Wrap"/>
+            </ScrollViewer>
+        </Border>
+
+        <!-- Status / Progress Bar -->
+        <StackPanel Grid.Row="6" Margin="0,15,0,0">
+            <TextBlock Name="StatusLabel" Text="Ready" FontSize="12" Foreground="#888888" Margin="0,0,0,5"/>
+            <ProgressBar Name="ActivityProgressBar" Height="8" Minimum="0" Maximum="100" Value="0" Background="#252526" Foreground="#007ACC"/>
+        </StackPanel>
+    </Grid>
+</Window>

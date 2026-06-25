@@ -7,7 +7,7 @@ using System.Threading;
 
 namespace Ventoy2DiskDotNet
 {
-    class Program
+    public class Program
     {
         static int Main(string[] args)
         {
@@ -187,7 +187,7 @@ namespace Ventoy2DiskDotNet
             }
         }
 
-        static void ExecuteInstall(PhysicalDisk disk, bool isGpt, bool secureBoot, string filesystem)
+        public static void ExecuteInstall(PhysicalDisk disk, bool isGpt, bool secureBoot, string filesystem)
         {
             string baseDir = AppContext.BaseDirectory;
             string bootImgPath = Path.Combine(baseDir, "boot", "boot.img");
@@ -283,7 +283,7 @@ namespace Ventoy2DiskDotNet
             FormatPartition1(disk, filesystem);
         }
 
-        static void ExecuteUpdate(PhysicalDisk disk, bool secureBoot)
+        public static void ExecuteUpdate(PhysicalDisk disk, bool secureBoot)
         {
             string baseDir = AppContext.BaseDirectory;
             string bootImgPath = Path.Combine(baseDir, "boot", "boot.img");

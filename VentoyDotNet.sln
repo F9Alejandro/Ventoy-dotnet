@@ -1,4 +1,4 @@
-
+﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
@@ -9,7 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ventoy2DiskDotNet", "src\Ve
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Ventoy2Disk", "src\Ventoy2Disk\Ventoy2Disk\Ventoy2Disk.vcxproj", "{8D231B30-65B1-48A2-A720-F659E61DD390}"
 EndProject
-
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ventoy2DiskAvalonia", "src\Ventoy2DiskAvalonia\Ventoy2DiskAvalonia.csproj", "{7F0D4E84-950C-40DF-8CC3-331CED6B7CC7}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -27,9 +28,14 @@ Global
 		{8D231B30-65B1-48A2-A720-F659E61DD390}.Debug|Any CPU.Build.0 = Debug|x64
 		{8D231B30-65B1-48A2-A720-F659E61DD390}.Release|Any CPU.ActiveCfg = Release|x64
 		{8D231B30-65B1-48A2-A720-F659E61DD390}.Release|Any CPU.Build.0 = Release|x64
+		{7F0D4E84-950C-40DF-8CC3-331CED6B7CC7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7F0D4E84-950C-40DF-8CC3-331CED6B7CC7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7F0D4E84-950C-40DF-8CC3-331CED6B7CC7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7F0D4E84-950C-40DF-8CC3-331CED6B7CC7}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{25545504-0D8C-4EC9-9E3D-AC07EE12666A} = {67F71D49-87FC-4D12-8801-1DC1275B2533}
 		{8D231B30-65B1-48A2-A720-F659E61DD390} = {67F71D49-87FC-4D12-8801-1DC1275B2533}
+		{7F0D4E84-950C-40DF-8CC3-331CED6B7CC7} = {67F71D49-87FC-4D12-8801-1DC1275B2533}
 	EndGlobalSection
 EndGlobal
