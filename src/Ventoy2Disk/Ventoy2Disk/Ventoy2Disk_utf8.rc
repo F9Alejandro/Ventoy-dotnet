@@ -1,0 +1,268 @@
+﻿// Microsoft Visual C++ generated resource script.
+//
+#include "resource.h"
+
+#define APSTUDIO_READONLY_SYMBOLS
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 2 resource.
+//
+#include "winres.h"
+
+/////////////////////////////////////////////////////////////////////////////
+#undef APSTUDIO_READONLY_SYMBOLS
+
+/////////////////////////////////////////////////////////////////////////////
+// 中文(简体，中国) resources
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_CHS)
+LANGUAGE LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED
+
+#ifdef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// TEXTINCLUDE
+//
+
+1 TEXTINCLUDE 
+BEGIN
+    "resource.h/0"
+END
+
+2 TEXTINCLUDE 
+BEGIN
+    "#include ""winres.h""/r/n"
+    "/0"
+END
+
+3 TEXTINCLUDE 
+BEGIN
+    "/r/n"
+    "/0"
+END
+
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
+
+// Icon with lowest ID value placed first to ensure application icon
+// remains consistent on all systems.
+IDI_ICON1               ICON                    "Res//ventoy.ico"
+
+IDI_ICON2               ICON                    "Res//refresh.ico"
+
+IDI_ICON3               ICON                    "Res//secure.ico"
+
+IDI_ICON4               ICON                    "Res//secure2.ico"
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Version
+//
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,3
+ PRODUCTVERSION 1,0,0,3
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "000004b0"
+        BEGIN
+            VALUE "Comments", "https://www.ventoy.net"
+            VALUE "FileDescription", "Ventoy2Disk"
+            VALUE "FileVersion", "1.0.0.3"
+            VALUE "InternalName", "Ventoy2Disk.exe"
+            VALUE "LegalCopyright", "(C) 2021 longpanda (GPL v3+)"
+            VALUE "LegalTrademarks", "https://www.gnu.org/license/gpl-3.0.html"
+            VALUE "OriginalFilename", "Ventoy2Disk.exe"
+            VALUE "ProductName", "Ventoy"
+            VALUE "ProductVersion", "1.0.0.3"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0, 1200
+    END
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog
+//
+
+IDD_DIALOG1 DIALOGEX 0, 0, 219, 160
+STYLE DS_SETFONT | DS_CENTER | WS_MINIMIZEBOX | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+CAPTION "Ventoy2Disk"
+FONT 10, "Courier New", 400, 0, 0x0
+BEGIN
+    PUSHBUTTON      "Update",IDC_BUTTON3,123,107,59,18
+    COMBOBOX        IDC_COMBO1,8,20,180,59,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    GROUPBOX        "Device",IDC_STATIC_DEV,3,8,212,32
+    GROUPBOX        "Ventoy At Local",IDC_STATIC_LOCAL,3,43,106,28,BS_CENTER
+    PUSHBUTTON      "Install",IDC_BUTTON4,36,107,59,18
+    CTEXT           "0",IDC_STATIC_LOCAL_VER,15,55,75,11
+    GROUPBOX        "Ventoy In Device",IDC_STATIC_DISK,110,43,106,28,BS_CENTER
+    CTEXT           "",IDC_STATIC_DISK_VER,123,55,75,11
+    GROUPBOX        "Status - READY",IDC_STATIC_STATUS,3,76,213,22,BS_LEFT
+    CONTROL         "",IDC_PROGRESS1,"msctls_progress32",WS_BORDER,8,85,203,9
+    CONTROL         "",IDC_COMMAND1,"Button",BS_COMMANDLINK | WS_TABSTOP,190,13,23,25
+    RTEXT           "GPT",IDC_STATIC_LOCAL_STYLE,85,61,18,8
+    RTEXT           "MBR",IDC_STATIC_DEV_STYLE,190,61,20,8
+    CONTROL         "<a>www.ventoy.net</a>",IDC_SYSLINK1,"SysLink",LWS_RIGHT | WS_TABSTOP,155,132,60,10
+    RTEXT           "exFAT",IDC_STATIC_LOCAL_FS,80,52,23,8,SS_NOTIFY
+    RTEXT           "NTFS",IDC_STATIC_DEV_FS,187,52,23,8,SS_NOTIFY
+    ICON            "",IDC_ICON_LOCAL_SECURE,6,59,20,20,0,WS_EX_ACCEPTFILES
+    ICON            "",IDC_ICON_DISK_SECURE,113,59,20,20,0,WS_EX_ACCEPTFILES
+    CONTROL         "<a>donate</a>",IDC_SYSLINK2,"SysLink",WS_TABSTOP,4,132,121,10
+END
+
+IDD_DIALOG2 DIALOGEX 0, 0, 270, 164
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+CAPTION "Configuration"
+FONT 10, "MS Shell Dlg", 400, 0, 0x0
+BEGIN
+    DEFPUSHBUTTON   "OK",ID_PART_OK,65,137,50,14
+    PUSHBUTTON      "Cancel",ID_PART_CANCEL,155,137,50,14
+    CONTROL         "Preserve some space at the bottom of the disk",IDC_CHECK_RESERVE_SPACE,
+                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,66,249,10
+    GROUPBOX        "",IDC_STATIC_PRESERVER_SPACE,3,56,264,47
+    EDITTEXT        IDC_EDIT_RESERVE_SPACE_VAL,11,87,118,12,ES_AUTOHSCROLL | ES_NUMBER
+    COMBOBOX        IDC_COMBO_SPACE_UNIT,165,87,77,30,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    GROUPBOX        "",IDC_STATIC_XX,3,79,264,24,BS_LEFT
+    GROUPBOX        "",IDC_STATIC_X4,136,79,131,24,BS_LEFT
+    GROUPBOX        "",IDC_STATIC_ALIGN_4KB,3,104,264,23
+    CONTROL         "Align partitions with 4KB",IDC_CHECK_PART_ALIGN_4KB,
+                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,112,248,10
+    GROUPBOX        "File System For Ventoy Partition",IDC_VENTOY_PART_FS,3,6,264,49
+    CONTROL         "exFAT",IDC_RADIO1,"Button",BS_AUTORADIOBUTTON | WS_GROUP,80,21,36,10
+    CONTROL         "NTFS",IDC_RADIO2,"Button",BS_AUTORADIOBUTTON,128,21,32,10
+    CONTROL         "FAT32",IDC_RADIO3,"Button",BS_AUTORADIOBUTTON,171,21,36,10
+    CONTROL         "UDF",IDC_RADIO4,"Button",BS_AUTORADIOBUTTON,217,21,28,10
+    COMBOBOX        IDC_COMBO_CLUSTER_SIZE,79,36,163,30,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "File System",IDC_STATIC_PART_FS_TITLE,12,23,62,8
+    LTEXT           "Cluster Size",IDC_STATIC_PART_CLUSTER,12,38,64,8
+END
+
+IDD_DIALOG3 DIALOGEX 0, 0, 267, 119
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Warning"
+FONT 10, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    DEFPUSHBUTTON   "确定",ID_YES_OK,61,94,47,15
+    PUSHBUTTON      "取消",ID_YES_CANCEL,151,94,47,15
+    EDITTEXT        IDC_YES_EDIT1,84,66,54,16,ES_AUTOHSCROLL
+    LTEXT           "Please enter YES in the text box below to confirm that you are indeed to do a fresh install instead of upgrade.",IDC_YES_STATIC1,6,31,254,26
+    LTEXT           "<==",IDC_STATIC,142,70,14,12
+    LTEXT           "YES",IDC_YES_STATIC2,163,68,33,16
+    LTEXT           "Warning:  Data will be lost!",IDC_YES_STATIC4,7,6,254,19
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// DESIGNINFO
+//
+
+#ifdef APSTUDIO_INVOKED
+GUIDELINES DESIGNINFO
+BEGIN
+    IDD_DIALOG1, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 212
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 158
+    END
+
+    IDD_DIALOG2, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 263
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 157
+    END
+
+    IDD_DIALOG3, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 260
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 112
+    END
+END
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Menu
+//
+
+IDR_MENU1 MENU
+BEGIN
+    POPUP "配置选项"
+    BEGIN
+        MENUITEM "xxx",                         ID_40008
+        POPUP "Partition Style"
+        BEGIN
+            MENUITEM "MBR",                         ID_PARTSTYLE_MBR
+            MENUITEM "GPT",                         ID_PARTSTYLE_GPT
+        END
+    END
+    POPUP "Language"
+    BEGIN
+        MENUITEM "XXX",                         ID_LANGUAGE_XXX
+    END
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// AFX_DIALOG_LAYOUT
+//
+
+IDD_DIALOG3 AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+IDD_DIALOG1 AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+IDD_DIALOG2 AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+#endif    // 中文(简体，中国) resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+#ifndef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 3 resource.
+//
+
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // not APSTUDIO_INVOKED
+

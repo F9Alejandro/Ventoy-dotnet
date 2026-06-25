@@ -60,6 +60,14 @@ namespace Ventoy2DiskDotNet
                 string secureBootArg = (GetArgValue(args, "--secureboot") ?? "yes").ToLower();
                 bool secureBoot = (secureBootArg == "yes" || secureBootArg == "true" || secureBootArg == "1");
 
+                // Parse filesystem
+                string filesystem = (GetArgValue(args, "--filesystem", "-f") ?? "exfat").ToLower();
+                if (filesystem != "exfat" && filesystem != "ntfs")
+                {
+                    Console.WriteLine("Error: Filesystem must be 'exfat' or 'ntfs'.");
+                    return 1;
+                }
+
                 // Find matching disk
                 var disks = DiskService.GetPhysicalDisks();
                 PhysicalDisk? targetDisk = null;
@@ -84,6 +92,7 @@ namespace Ventoy2DiskDotNet
                 Console.WriteLine($"Selected Target Device: {targetDisk}");
                 Console.WriteLine($"Partition Style:       {(isGpt ? "GPT" : "MBR")}");
                 Console.WriteLine($"Secure Boot Support:   {(secureBoot ? "Enabled" : "Disabled")}");
+                Console.WriteLine($"Format Filesystem:     {filesystem.ToUpper()}");
                 Console.WriteLine();
 
                 if (isInstall)
@@ -100,7 +109,7 @@ namespace Ventoy2DiskDotNet
                         return 0;
                     }
 
-                    ExecuteInstall(targetDisk, isGpt, secureBoot);
+                    ExecuteInstall(targetDisk, isGpt, secureBoot, filesystem);
                 }
                 else if (isUpdate)
                 {
@@ -135,16 +144,17 @@ namespace Ventoy2DiskDotNet
         static void PrintUsage()
         {
             Console.WriteLine("Usage:");
-            Console.WriteLine("  --list, -l                  List all available physical drives.");
-            Console.WriteLine("  --install, -i               Install Ventoy from scratch (wipes disk).");
-            Console.WriteLine("  --update, -u                Update existing Ventoy installation.");
-            Console.WriteLine("  -d, --device <num|path>     Physical disk number (e.g. 1) or system path (e.g. /dev/sdb).");
-            Console.WriteLine("  -s, --style <mbr|gpt>       Partition table style (default: MBR).");
-            Console.WriteLine("  --secureboot <yes|no>       Enable or disable secure boot EFI loaders (default: yes).");
+            Console.WriteLine("  --list, -l                     List all available physical drives.");
+            Console.WriteLine("  --install, -i                  Install Ventoy from scratch (wipes disk).");
+            Console.WriteLine("  --update, -u                   Update existing Ventoy installation.");
+            Console.WriteLine("  -d, --device <num|path>        Physical disk number (e.g. 1) or system path (e.g. /dev/sdb).");
+            Console.WriteLine("  -s, --style <mbr|gpt>          Partition table style (default: MBR).");
+            Console.WriteLine("  --secureboot <yes|no>          Enable or disable secure boot EFI loaders (default: yes).");
+            Console.WriteLine("  -f, --filesystem <exfat|ntfs>  Filesystem type for Partition 1 (default: exfat).");
             Console.WriteLine();
             Console.WriteLine("Examples:");
             Console.WriteLine("  dotnet run -- --list");
-            Console.WriteLine("  dotnet run -- --install --device 1 --style gpt --secureboot no");
+            Console.WriteLine("  dotnet run -- --install --device 1 --style gpt --secureboot no --filesystem ntfs");
             Console.WriteLine("  dotnet run -- --update --device /dev/sdb --secureboot yes");
         }
 
@@ -177,7 +187,7 @@ namespace Ventoy2DiskDotNet
             }
         }
 
-        static void ExecuteInstall(PhysicalDisk disk, bool isGpt, bool secureBoot)
+        static void ExecuteInstall(PhysicalDisk disk, bool isGpt, bool secureBoot, string filesystem)
         {
             string baseDir = AppContext.BaseDirectory;
             string bootImgPath = Path.Combine(baseDir, "boot", "boot.img");
@@ -206,7 +216,7 @@ namespace Ventoy2DiskDotNet
                 if (!isGpt)
                 {
                     // MBR Style installation
-                    // FsFlag = 0x07 (exFAT)
+                    // FsFlag = 0x07 (exFAT/NTFS)
                     MbrHead mbr = PartitionService.FillMbr(disk.SizeInBytes, bootImgBytes, 0x07);
                     byte[] mbrBytes = mbr.Serialize();
                     driveStream.Position = 0;
@@ -214,7 +224,6 @@ namespace Ventoy2DiskDotNet
 
                     Console.WriteLine("Step 4: Writing grub stage 2 core.img to sector 1...");
                     driveStream.Position = 512;
-                    // Write core.img bytes (aligned to 1MB size)
                     byte[] alignedCore = new byte[1024 * 1024 - 512];
                     Array.Copy(coreImgBytes, 0, alignedCore, 0, Math.Min(coreImgBytes.Length, alignedCore.Length));
                     driveStream.Write(alignedCore, 0, alignedCore.Length);
@@ -234,7 +243,6 @@ namespace Ventoy2DiskDotNet
                     driveStream.Write(gptBytes, 0, gptBytes.Length);
 
                     Console.WriteLine("Step 4: Writing grub stage 2 core.img to sector 34 (updating blocklist)...");
-                    // Modify byte 500 of core.img to 35 in GPT style
                     coreImgBytes[500] = 35;
                     driveStream.Position = 34 * 512;
                     byte[] alignedCore = new byte[1024 * 1024 - 34 * 512];
@@ -259,12 +267,10 @@ namespace Ventoy2DiskDotNet
                         Array.Copy(entryBytes, 0, partArrayBytes, i * 128, 128);
                     }
 
-                    // Write backup partition array at TotalSectors - 33
                     ulong backupPartArrayLba = (disk.SizeInBytes / 512) - 33;
                     driveStream.Position = (long)(backupPartArrayLba * 512);
                     driveStream.Write(partArrayBytes, 0, partArrayBytes.Length);
 
-                    // Write backup header at TotalSectors - 1
                     ulong backupHeaderLba = (disk.SizeInBytes / 512) - 1;
                     driveStream.Position = (long)(backupHeaderLba * 512);
                     driveStream.Write(backupHeadBytes, 0, 512);
@@ -273,8 +279,8 @@ namespace Ventoy2DiskDotNet
                 driveStream.Flush();
             }
 
-            Console.WriteLine("Step 7: Formatting Partition 1 with exFAT filesystem...");
-            FormatPartition1(disk);
+            Console.WriteLine($"Step 7: Formatting Partition 1 with {filesystem.ToUpper()} filesystem...");
+            FormatPartition1(disk, filesystem);
         }
 
         static void ExecuteUpdate(PhysicalDisk disk, bool secureBoot)
@@ -312,7 +318,6 @@ namespace Ventoy2DiskDotNet
                     throw new Exception("Error: The target disk does not have a valid boot sector signature (0x55AA).");
                 }
 
-                // Check FsFlag of partition 1 to detect Protective MBR
                 isGpt = (sector0[446 + 4] == 0xEE);
 
                 if (!isGpt)
@@ -326,9 +331,8 @@ namespace Ventoy2DiskDotNet
 
                     Console.WriteLine($"Detected Ventoy MBR installation. VTOYEFI starts at sector {part2StartSector}.");
                     Console.WriteLine("Step 3: Writing MBR boot code...");
-                    // Merge new boot code with old partition table entries
                     MbrHead newMbr = PartitionService.FillMbr(disk.SizeInBytes, bootImgBytes, 0x07);
-                    newMbr.PartTbl = mbr.PartTbl; // Preserve existing partitions!
+                    newMbr.PartTbl = mbr.PartTbl;
                     byte[] newMbrBytes = newMbr.Serialize();
 
                     driveStream.Position = 0;
@@ -342,7 +346,6 @@ namespace Ventoy2DiskDotNet
                 }
                 else
                 {
-                    // GPT style update
                     byte[] gptBytes = new byte[17408];
                     driveStream.Position = 0;
                     driveStream.Read(gptBytes, 0, 17408);
@@ -365,11 +368,9 @@ namespace Ventoy2DiskDotNet
                     Console.WriteLine("Step 3: Writing GPT primary structures...");
                     
                     GptInfo newGpt = PartitionService.FillGpt(disk.SizeInBytes, bootImgBytes);
-                    // Preserve the exact partition mappings
                     newGpt.PartTbl = existingGpt.PartTbl;
 
-                    // Recalculate primary GPT header values
-                    newGpt.Head.DiskGuid = existingGpt.Head.DiskGuid; // keep disk GUID
+                    newGpt.Head.DiskGuid = existingGpt.Head.DiskGuid;
                     
                     byte[] partArrayBytes = new byte[128 * 128];
                     for (int i = 0; i < 128; i++)
@@ -394,7 +395,6 @@ namespace Ventoy2DiskDotNet
                     Array.Copy(coreImgBytes, 0, alignedCore, 0, Math.Min(coreImgBytes.Length, alignedCore.Length));
                     driveStream.Write(alignedCore, 0, alignedCore.Length);
 
-                    // Backup GPT
                     Console.WriteLine("Step 5: Writing Backup GPT header and partition array to end of disk...");
                     GptHeader backupHead = PartitionService.CreateBackupGptHeader(newGpt);
                     byte[] backupHeadBytes = backupHead.Serialize();
@@ -434,7 +434,6 @@ namespace Ventoy2DiskDotNet
 
                 using (var fs = new DiscUtils.Fat.FatFileSystem(fatStream))
                 {
-                    // Process x64 EFI files
                     string grubx64Path = @"EFI\BOOT\grubx64_real.efi";
                     if (fs.FileExists(grubx64Path))
                     {
@@ -460,7 +459,6 @@ namespace Ventoy2DiskDotNet
                         Console.WriteLine(" -> Successfully toggled Secure Boot OFF for x64.");
                     }
 
-                    // Process ia32 EFI files
                     string grubia32Path = @"EFI\BOOT\grubia32_real.efi";
                     if (fs.FileExists(grubia32Path))
                     {
@@ -496,12 +494,13 @@ namespace Ventoy2DiskDotNet
             }
         }
 
-        static void FormatPartition1(PhysicalDisk disk)
+        static void FormatPartition1(PhysicalDisk disk, string filesystem)
         {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                Console.WriteLine("Formatting Partition 1 as exFAT (Windows diskpart)...");
-                string script = $"select disk {disk.Number}\nselect partition 1\nformat fs=exfat label=Ventoy quick\n";
+                Console.WriteLine($"Formatting Partition 1 as {filesystem.ToUpper()} (Windows diskpart)...");
+                string fsType = filesystem == "ntfs" ? "ntfs" : "exfat";
+                string script = $"select disk {disk.Number}\nselect partition 1\nformat fs={fsType} label=Ventoy quick\n";
                 string tempFile = Path.GetTempFileName();
                 File.WriteAllText(tempFile, script);
 
@@ -568,7 +567,6 @@ namespace Ventoy2DiskDotNet
                     throw new Exception($"Error: Partition device file '{partPath}' did not appear in time. Formatting failed.");
                 }
 
-                // Call architecture-appropriate mkexfatfs
                 string baseDir = AppContext.BaseDirectory;
                 string arch = RuntimeInformation.ProcessArchitecture switch
                 {
@@ -578,48 +576,104 @@ namespace Ventoy2DiskDotNet
                     _ => "x86_64"
                 };
 
-                string mkexfatfsPath = Path.Combine(baseDir, "tool", arch, "mkexfatfs");
-                if (!File.Exists(mkexfatfsPath))
+                if (filesystem == "ntfs")
                 {
-                    throw new FileNotFoundException($"mkexfatfs tool not found at: {mkexfatfsPath}");
-                }
-
-                // Set executable permission
-                try
-                {
-                    var chmodPsi = new System.Diagnostics.ProcessStartInfo("chmod", $"+x \"{mkexfatfsPath}\"")
+                    string mkntfsPath = Path.Combine(baseDir, "tool", arch, "mkfs.ntfs");
+                    if (!File.Exists(mkntfsPath))
                     {
+                        string mkntfsAltPath = Path.Combine(baseDir, "tool", arch, "mkntfs");
+                        if (File.Exists(mkntfsAltPath))
+                        {
+                            mkntfsPath = mkntfsAltPath;
+                        }
+                        else
+                        {
+                            throw new FileNotFoundException($"mkfs.ntfs tool not found at: {mkntfsPath}");
+                        }
+                    }
+
+                    // Set executable permission
+                    try
+                    {
+                        var chmodPsi = new System.Diagnostics.ProcessStartInfo("chmod", $"+x \"{mkntfsPath}\"")
+                        {
+                            UseShellExecute = false,
+                            CreateNoWindow = true
+                        };
+                        using var proc = System.Diagnostics.Process.Start(chmodPsi);
+                        proc?.WaitForExit();
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Warning: Failed to set executable permission on mkfs.ntfs: {ex.Message}");
+                    }
+
+                    Console.WriteLine($"Formatting Partition 1 ({partPath}) as NTFS using bundled {arch} mkfs.ntfs...");
+                    var formatPsi = new System.Diagnostics.ProcessStartInfo(mkntfsPath, $"-f -F -L Ventoy {partPath}")
+                    {
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
                         UseShellExecute = false,
                         CreateNoWindow = true
                     };
-                    using var proc = System.Diagnostics.Process.Start(chmodPsi);
-                    proc?.WaitForExit();
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Warning: Failed to set executable permission on mkexfatfs: {ex.Message}");
-                }
 
-                Console.WriteLine($"Formatting Partition 1 ({partPath}) as exFAT using bundled {arch} mkexfatfs...");
-                var formatPsi = new System.Diagnostics.ProcessStartInfo(mkexfatfsPath, $"-n Ventoy {partPath}")
-                {
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
+                    using var formatProc = System.Diagnostics.Process.Start(formatPsi);
+                    formatProc?.WaitForExit();
+                    string output = formatProc?.StandardOutput.ReadToEnd() ?? "";
+                    string error = formatProc?.StandardError.ReadToEnd() ?? "";
 
-                using var formatProc = System.Diagnostics.Process.Start(formatPsi);
-                formatProc?.WaitForExit();
-                string output = formatProc?.StandardOutput.ReadToEnd() ?? "";
-                string error = formatProc?.StandardError.ReadToEnd() ?? "";
-                
-                if (formatProc?.ExitCode != 0)
-                {
-                    throw new Exception($"Formatting failed with exit code {formatProc?.ExitCode}. Stderr: {error}. Stdout: {output}");
+                    if (formatProc?.ExitCode != 0)
+                    {
+                        throw new Exception($"Formatting failed with exit code {formatProc?.ExitCode}. Stderr: {error}. Stdout: {output}");
+                    }
+
+                    Console.WriteLine("NTFS partition formatted successfully!");
                 }
+                else
+                {
+                    string mkexfatfsPath = Path.Combine(baseDir, "tool", arch, "mkexfatfs");
+                    if (!File.Exists(mkexfatfsPath))
+                    {
+                        throw new FileNotFoundException($"mkexfatfs tool not found at: {mkexfatfsPath}");
+                    }
 
-                Console.WriteLine("exFAT partition formatted successfully!");
+                    // Set executable permission
+                    try
+                    {
+                        var chmodPsi = new System.Diagnostics.ProcessStartInfo("chmod", $"+x \"{mkexfatfsPath}\"")
+                        {
+                            UseShellExecute = false,
+                            CreateNoWindow = true
+                        };
+                        using var proc = System.Diagnostics.Process.Start(chmodPsi);
+                        proc?.WaitForExit();
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Warning: Failed to set executable permission on mkexfatfs: {ex.Message}");
+                    }
+
+                    Console.WriteLine($"Formatting Partition 1 ({partPath}) as exFAT using bundled {arch} mkexfatfs...");
+                    var formatPsi = new System.Diagnostics.ProcessStartInfo(mkexfatfsPath, $"-n Ventoy {partPath}")
+                    {
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+
+                    using var formatProc = System.Diagnostics.Process.Start(formatPsi);
+                    formatProc?.WaitForExit();
+                    string output = formatProc?.StandardOutput.ReadToEnd() ?? "";
+                    string error = formatProc?.StandardError.ReadToEnd() ?? "";
+
+                    if (formatProc?.ExitCode != 0)
+                    {
+                        throw new Exception($"Formatting failed with exit code {formatProc?.ExitCode}. Stderr: {error}. Stdout: {output}");
+                    }
+
+                    Console.WriteLine("exFAT partition formatted successfully!");
+                }
             }
         }
     }
