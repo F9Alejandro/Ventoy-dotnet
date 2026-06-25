@@ -1,102 +1,53 @@
-# Ventoy .NET (ventoy-dotnet)
+# Ventoy .NET Installer (Cross-Platform)
 
-A modern, cross-platform rebuild of the **Ventoy** installation and utility tools in **.NET 8.0**, replacing the legacy C-based Win32 UI, Linux GTK/Qt launchers, bash scripts, and Unix components with a single, portable C# codebase.
+A cross-platform port of the Ventoy Windows installer (`Ventoy2Disk`) rebuilt from scratch in **.NET 8.0** to run natively on Windows and Linux.
 
-## Project Structure
+## Features
 
-This repository is organized into a clean .NET solution containing the following projects:
+1. **Cross-Platform Drive Scanning**: Lists physical disks on Windows (using Win32 API) and Linux (using `/sys/block` scanning) with sizes, models, and vendors.
+2. **Direct Raw Disk Writing**: Writes MBR/GPT partition tables and Stage 2 Grub bootloader directly to raw streams of target devices.
+3. **In-Memory Secure Boot Toggle**: Modifies partition 2 (`ventoy.disk.img.xz` FAT image) directly in-memory using `DiscUtils.Fat` before writing to the disk, dynamically removing shim/MokManager files when Secure Boot support is disabled.
+4. **Native exFAT Formatting**: Automatically formats partition 1 with exFAT and labels it "Ventoy" using native OS capabilities (via `diskpart` script on Windows and bundled `mkexfatfs` on Linux).
 
-- **[Ventoy2DiskDotNet](src/Ventoy2DiskDotNet)**: The core Ventoy installation, update, and disk wiping engine.
-  - Features a native C# implementation for Linux disk operations (wiping, partition table creation via `parted`, filesystem formatting, writing bootloaders/core images).
-  - Integrates the **VentoyPlugson** web server configuration API endpoints, allowing users to configure plugins (`ventoy.json`) directly from their web browser.
-- **[Ventoy2DiskAvalonia](src/Ventoy2DiskAvalonia)**: The unified, cross-platform desktop GUI built using **Avalonia UI**.
-  - Replaces *both* the legacy Windows Win32 UI (`Ventoy2Disk.exe`) and the Linux GTK/Qt C launcher wrappers (`VentoyGUI`).
-  - Includes a modern, responsive layout with two main views:
-    1. **Ventoy2Disk Installer**: Choose target drives, select partition styles (MBR/GPT), toggle secure boot, and perform safe installs/updates.
-    2. **Virtual Link (Vlnk) Creator**: Visually choose source image files, auto-resolve target partition offsets/disk signatures, and generate `.vlnk` files cross-platform.
-- **[VentoyVlnk](src/VentoyVlnk)**: The cross-platform CLI utility to create virtual link files (`.vlnk`) for booting files from other partition/disk targets.
+## Prerequisites
 
-All dependencies, bootloaders, and static web pages are cleanly packaged inside `src/Ventoy2DiskDotNet/ventoy/` and `src/Ventoy2DiskDotNet/www/` and are copied to the build output directory automatically on compilation.
+- **.NET SDK 8.0**
+- On **Linux**, administrative (`sudo`/`root`) privileges are required to write directly to block devices.
+- On **Windows**, the application must be run as **Administrator** to acquire raw handles to physical disks.
 
-## Build Requirements
+## Usage
 
-- **.NET 8.0 SDK** or higher.
-- (Linux) Standard system utilities for raw disk partitioning and formatting: `parted`, `mkfs.vfat`, `udevadm`, `partprobe`.
-
-## Building the Solution
-
-To build all projects in the solution, run the following command from the root directory:
-
+### List Physical Drives
+To scan and list all available physical devices:
 ```bash
-/root/.dotnet/dotnet build VentoyDotNet.sln
+# On Linux (as root):
+/root/.dotnet/dotnet run --project src/Ventoy2DiskDotNet/Ventoy2DiskDotNet.csproj -- --list
+
+# On Windows (as Administrator):
+dotnet run --project src/Ventoy2DiskDotNet/Ventoy2DiskDotNet.csproj -- --list
 ```
 
-## Running the Desktop GUI (Avalonia)
-
-### On Linux
-
-Since raw disk access and filesystem formatting require superuser privileges, run the GUI application with `sudo` under your X11/Wayland desktop session:
-
+### Install Ventoy (Wipes Disk)
+To perform a clean installation of Ventoy onto a target device (MBR style with Secure Boot support enabled):
 ```bash
-sudo /root/.dotnet/dotnet run --project src/Ventoy2DiskAvalonia/Ventoy2DiskAvalonia.csproj
+/root/.dotnet/dotnet run --project src/Ventoy2DiskDotNet/Ventoy2DiskDotNet.csproj -- --install --device /dev/sdb --style MBR --secureboot yes
 ```
 
-### On Windows
-
-Open a terminal as Administrator and execute:
-
-```cmd
-dotnet run --project src\Ventoy2DiskAvalonia\Ventoy2DiskAvalonia.csproj
-```
-
----
-
-## Running the Web GUI (Plugson Web Mode)
-
-### On Linux
-
+To perform a clean GPT style installation with Secure Boot support disabled:
 ```bash
-sudo /root/.dotnet/dotnet run --project src/Ventoy2DiskDotNet/Ventoy2DiskDotNet.csproj
+/root/.dotnet/dotnet run --project src/Ventoy2DiskDotNet/Ventoy2DiskDotNet.csproj -- --install --device /dev/sdb --style GPT --secureboot no
 ```
 
-By default, the server starts on `http://127.0.0.1:24681`. Open your browser and navigate to this URL to install or update Ventoy.
-
-### On Windows
-
-Run the application as Administrator:
-
-```cmd
-dotnet run --project src\Ventoy2DiskDotNet\Ventoy2DiskDotNet.csproj
-```
-
----
-
-## Running the CLI Virtual Link Tool (VentoyVlnk)
-
-To create a virtual link file via the command line:
-
+### Update Ventoy (Preserves Partition 1 Data)
+To update the Ventoy system files on a device without deleting your ISOs or personal data:
 ```bash
-/root/.dotnet/dotnet run --project src/VentoyVlnk/VentoyVlnk.csproj -- -c <filepath>
+/root/.dotnet/dotnet run --project src/Ventoy2DiskDotNet/Ventoy2DiskDotNet.csproj -- --update --device /dev/sdb --secureboot yes
 ```
 
----
+## Structure
 
-## Packaging and Standalone Deployment
-
-You can publish standalone, self-contained packages for specific target platforms (meaning the user doesn't even need .NET installed to run them):
-
-### Package for Linux (x64)
-
-```bash
-/root/.dotnet/dotnet publish src/Ventoy2DiskAvalonia/Ventoy2DiskAvalonia.csproj -c Release -r linux-x64 --self-contained true
-```
-
-The output standalone directory will be generated at `src/Ventoy2DiskAvalonia/bin/Release/net8.0/linux-x64/publish/`.
-
-### Package for Windows (x64)
-
-```bash
-/root/.dotnet/dotnet publish src/Ventoy2DiskAvalonia/Ventoy2DiskAvalonia.csproj -c Release -r win-x64 --self-contained true
-```
-
-The output standalone directory will be generated at `src/Ventoy2DiskAvalonia/bin/Release/net8.0/win-x64/publish/`.
+- [Program.cs](file:///root/ventoy-dotnet/src/Ventoy2DiskDotNet/Program.cs): Entry point parsing arguments, presenting warnings, and coordinating installation/updates.
+- [Structures.cs](file:///root/ventoy-dotnet/src/Ventoy2DiskDotNet/Structures.cs): Binary layouts and serialization models for Partition Table Entries, MBR boot code, and GPT Headers.
+- [PartitionService.cs](file:///root/ventoy-dotnet/src/Ventoy2DiskDotNet/PartitionService.cs): Fills in partition tables, handles GPT CRC checksums, and manages LBA offsets.
+- [DiskService.cs](file:///root/ventoy-dotnet/src/Ventoy2DiskDotNet/DiskService.cs): Manages physical disk queries and acquires exclusive read/write disk streams.
+- [Decompressor.cs](file:///root/ventoy-dotnet/src/Ventoy2DiskDotNet/Decompressor.cs): XZ decompression logic using `SharpCompress`.

@@ -1,1629 +1,626 @@
 using System;
 using System.IO;
-using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Nodes;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.FileProviders;
+using System.Threading;
 
 namespace Ventoy2DiskDotNet
 {
-    public class Program
+    class Program
     {
-        private static string _curServerToken = Guid.NewGuid().ToString("n");
-        private static string _curLanguage = "en-US";
-        private static int _curPartStyle = 0; // 0 = MBR, 1 = GPT
-
-        // Progress state for Ventoy2Disk
-        private static int _percent = 100;
-        private static string _processDisk = string.Empty;
-        private static string _processType = string.Empty; // "install", "update", "clean"
-        private static string _processResult = "success"; // "success", "failed"
-        private static readonly object _progressLock = new object();
-
-        public static int Percent { get { lock (_progressLock) { return _percent; } } }
-        public static string ProcessDisk { get { lock (_progressLock) { return _processDisk; } } }
-        public static string ProcessType { get { lock (_progressLock) { return _processType; } } }
-        public static string ProcessResult { get { lock (_progressLock) { return _processResult; } } }
-        public static object ProgressLock => _progressLock;
-
-        // Plugson settings
-        private static string _plugsonMountPoint = string.Empty;
-
-        // Win32 declarations for device scanning on Windows
-        internal static class Win32
+        static int Main(string[] args)
         {
-            public const uint GENERIC_READ = 0x80000000;
-            public const uint FILE_SHARE_READ = 0x00000001;
-            public const uint FILE_SHARE_WRITE = 0x00000002;
-            public const uint OPEN_EXISTING = 3;
-            public static readonly IntPtr INVALID_HANDLE_VALUE = new IntPtr(-1);
-            public const uint IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS = 0x00560000;
+            Console.WriteLine("==================================================");
+            Console.WriteLine("          Ventoy .NET Installer (Cross-Platform)  ");
+            Console.WriteLine("==================================================");
 
-            [StructLayout(LayoutKind.Sequential)]
-            public struct DISK_EXTENT
+            if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
             {
-                public uint DiskNumber;
-                public long StartingOffset;
-                public long PartitionLength;
+                PrintUsage();
+                return 0;
             }
 
-            [StructLayout(LayoutKind.Sequential)]
-            public struct VOLUME_DISK_EXTENTS
-            {
-                public uint NumberOfDiskExtents;
-                public DISK_EXTENT Extent;
-            }
-
-            [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]
-            public static extern IntPtr CreateFile(
-                string lpFileName,
-                uint dwDesiredAccess,
-                uint dwShareMode,
-                IntPtr lpSecurityAttributes,
-                uint dwCreationDisposition,
-                uint dwFlagsAndAttributes,
-                IntPtr hTemplateFile);
-
-            [DllImport("kernel32.dll", SetLastError = true)]
-            [return: MarshalAs(UnmanagedType.Bool)]
-            public static extern bool CloseHandle(IntPtr hObject);
-
-            [DllImport("kernel32.dll", SetLastError = true)]
-            [return: MarshalAs(UnmanagedType.Bool)]
-            public static extern bool DeviceIoControl(
-                IntPtr hDevice,
-                uint dwIoControlCode,
-                IntPtr lpInBuffer,
-                uint nInBufferSize,
-                ref VOLUME_DISK_EXTENTS lpOutBuffer,
-                uint nOutBufferSize,
-                out uint lpBytesReturned,
-                IntPtr lpOverlapped);
-
-            [DllImport("kernel32.dll", SetLastError = true)]
-            [return: MarshalAs(UnmanagedType.Bool)]
-            public static extern bool ReadFile(
-                IntPtr hFile,
-                byte[] lpBuffer,
-                uint nNumberOfBytesToRead,
-                out uint lpNumberOfBytesRead,
-                IntPtr lpOverlapped);
-
-            [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-            public static extern uint GetLogicalDrives();
-        }
-
-        public class DiskInfo
-        {
-            public string Name { get; set; } = string.Empty;
-            public string Model { get; set; } = string.Empty;
-            public string HumanSize { get; set; } = string.Empty;
-            public long SizeBytes { get; set; }
-            public int VtoyValid { get; set; } // 0 = invalid, 1 = valid
-            public string VtoyVer { get; set; } = string.Empty;
-            public int VtoySecureBoot { get; set; } // 0 = disabled, 1 = enabled
-            public int VtoyPartStyle { get; set; } // 0 = MBR, 1 = GPT
-        }
-
-        private static string FormatSize(long bytes)
-        {
-            string[] suffixes = { "B", "KB", "MB", "GB", "TB" };
-            int counter = 0;
-            double dValue = bytes;
-            while (Math.Round(dValue / 1024) >= 1)
-            {
-                dValue /= 1024;
-                counter++;
-            }
-            return $"{dValue:F1} {suffixes[counter]}";
-        }
-
-        // Linux device detection
-        public static List<DiskInfo> GetLinuxDisks(bool showAll)
-        {
-            var list = new List<DiskInfo>();
             try
             {
-                var psi = new ProcessStartInfo("lsblk", "-J -b -o NAME,MODEL,SIZE,TYPE,TRAN")
+                if (args.Contains("--list") || args.Contains("-l"))
+                {
+                    ListDrives();
+                    return 0;
+                }
+
+                bool isInstall = args.Contains("--install") || args.Contains("-i");
+                bool isUpdate = args.Contains("--update") || args.Contains("-u");
+
+                if (!isInstall && !isUpdate)
+                {
+                    Console.WriteLine("Error: Must specify either --install (-i) or --update (-u).");
+                    PrintUsage();
+                    return 1;
+                }
+
+                // Parse device
+                string? deviceArg = GetArgValue(args, "--device", "-d");
+                if (string.IsNullOrEmpty(deviceArg))
+                {
+                    Console.WriteLine("Error: Target device not specified. Use --device (-d) followed by drive number or path.");
+                    return 1;
+                }
+
+                // Parse style
+                string styleArg = (GetArgValue(args, "--style", "-s") ?? "mbr").ToLower();
+                if (styleArg != "mbr" && styleArg != "gpt")
+                {
+                    Console.WriteLine("Error: Partition style must be 'mbr' or 'gpt'.");
+                    return 1;
+                }
+                bool isGpt = (styleArg == "gpt");
+
+                // Parse secureboot
+                string secureBootArg = (GetArgValue(args, "--secureboot") ?? "yes").ToLower();
+                bool secureBoot = (secureBootArg == "yes" || secureBootArg == "true" || secureBootArg == "1");
+
+                // Find matching disk
+                var disks = DiskService.GetPhysicalDisks();
+                PhysicalDisk? targetDisk = null;
+
+                if (int.TryParse(deviceArg, out int diskNum))
+                {
+                    targetDisk = disks.FirstOrDefault(d => d.Number == diskNum);
+                }
+                else
+                {
+                    targetDisk = disks.FirstOrDefault(d => d.Path.Equals(deviceArg, StringComparison.OrdinalIgnoreCase) || 
+                                                           d.SystemName.Equals(deviceArg, StringComparison.OrdinalIgnoreCase));
+                }
+
+                if (targetDisk == null)
+                {
+                    Console.WriteLine($"Error: Target device '{deviceArg}' not found.");
+                    Console.WriteLine("Use --list to see available physical drives.");
+                    return 1;
+                }
+
+                Console.WriteLine($"Selected Target Device: {targetDisk}");
+                Console.WriteLine($"Partition Style:       {(isGpt ? "GPT" : "MBR")}");
+                Console.WriteLine($"Secure Boot Support:   {(secureBoot ? "Enabled" : "Disabled")}");
+                Console.WriteLine();
+
+                if (isInstall)
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine("WARNING: ALL DATA ON THE TARGET DISK WILL BE DESTROYED!");
+                    Console.WriteLine("This action cannot be undone. Are you sure you want to proceed?");
+                    Console.ResetColor();
+                    Console.Write("Type 'YES' to confirm: ");
+                    string? confirm = Console.ReadLine();
+                    if (confirm != "YES")
+                    {
+                        Console.WriteLine("Operation cancelled by user.");
+                        return 0;
+                    }
+
+                    ExecuteInstall(targetDisk, isGpt, secureBoot);
+                }
+                else if (isUpdate)
+                {
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine("WARNING: This will update the Ventoy bootloader and system files on Partition 2.");
+                    Console.WriteLine("Your files on Partition 1 should remain safe, but backups are always recommended.");
+                    Console.ResetColor();
+                    Console.Write("Type 'YES' to confirm: ");
+                    string? confirm = Console.ReadLine();
+                    if (confirm != "YES")
+                    {
+                        Console.WriteLine("Operation cancelled by user.");
+                        return 0;
+                    }
+
+                    ExecuteUpdate(targetDisk, secureBoot);
+                }
+
+                Console.WriteLine("Operation completed successfully!");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"Fatal Error: {ex.Message}");
+                Console.WriteLine(ex.StackTrace);
+                Console.ResetColor();
+                return 1;
+            }
+        }
+
+        static void PrintUsage()
+        {
+            Console.WriteLine("Usage:");
+            Console.WriteLine("  --list, -l                  List all available physical drives.");
+            Console.WriteLine("  --install, -i               Install Ventoy from scratch (wipes disk).");
+            Console.WriteLine("  --update, -u                Update existing Ventoy installation.");
+            Console.WriteLine("  -d, --device <num|path>     Physical disk number (e.g. 1) or system path (e.g. /dev/sdb).");
+            Console.WriteLine("  -s, --style <mbr|gpt>       Partition table style (default: MBR).");
+            Console.WriteLine("  --secureboot <yes|no>       Enable or disable secure boot EFI loaders (default: yes).");
+            Console.WriteLine();
+            Console.WriteLine("Examples:");
+            Console.WriteLine("  dotnet run -- --list");
+            Console.WriteLine("  dotnet run -- --install --device 1 --style gpt --secureboot no");
+            Console.WriteLine("  dotnet run -- --update --device /dev/sdb --secureboot yes");
+        }
+
+        static string? GetArgValue(string[] args, string flag, string? alternative = null)
+        {
+            for (int i = 0; i < args.Length - 1; i++)
+            {
+                if (args[i].Equals(flag, StringComparison.OrdinalIgnoreCase) || 
+                    (alternative != null && args[i].Equals(alternative, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return args[i + 1];
+                }
+            }
+            return null;
+        }
+
+        static void ListDrives()
+        {
+            Console.WriteLine("Scanning physical drives...");
+            var disks = DiskService.GetPhysicalDisks();
+            if (disks.Count == 0)
+            {
+                Console.WriteLine("No physical drives detected (make sure you are running as Administrator/root).");
+                return;
+            }
+
+            foreach (var disk in disks)
+            {
+                Console.WriteLine($" - {disk}");
+            }
+        }
+
+        static void ExecuteInstall(PhysicalDisk disk, bool isGpt, bool secureBoot)
+        {
+            string baseDir = AppContext.BaseDirectory;
+            string bootImgPath = Path.Combine(baseDir, "boot", "boot.img");
+            string coreImgXzPath = Path.Combine(baseDir, "boot", "core.img.xz");
+            string diskImgXzPath = Path.Combine(baseDir, "ventoy", "ventoy.disk.img.xz");
+
+            // Verify assets
+            VerifyAssetExists(bootImgPath);
+            VerifyAssetExists(coreImgXzPath);
+            VerifyAssetExists(diskImgXzPath);
+
+            Console.WriteLine("Step 1: Reading and decompressing binary bootloader assets...");
+            byte[] bootImgBytes = File.ReadAllBytes(bootImgPath);
+            byte[] coreImgBytes = Decompressor.DecompressXz(coreImgXzPath);
+            byte[] fatImgBytes = Decompressor.DecompressXz(diskImgXzPath);
+
+            if (!secureBoot)
+            {
+                fatImgBytes = ModifySecureBoot(fatImgBytes);
+            }
+
+            Console.WriteLine($"Step 2: Opening target physical drive stream: {disk.Path}");
+            using (Stream driveStream = DiskService.OpenWriteHandle(disk))
+            {
+                Console.WriteLine("Step 3: Writing MBR/GPT partition tables...");
+                if (!isGpt)
+                {
+                    // MBR Style installation
+                    // FsFlag = 0x07 (exFAT)
+                    MbrHead mbr = PartitionService.FillMbr(disk.SizeInBytes, bootImgBytes, 0x07);
+                    byte[] mbrBytes = mbr.Serialize();
+                    driveStream.Position = 0;
+                    driveStream.Write(mbrBytes, 0, 512);
+
+                    Console.WriteLine("Step 4: Writing grub stage 2 core.img to sector 1...");
+                    driveStream.Position = 512;
+                    // Write core.img bytes (aligned to 1MB size)
+                    byte[] alignedCore = new byte[1024 * 1024 - 512];
+                    Array.Copy(coreImgBytes, 0, alignedCore, 0, Math.Min(coreImgBytes.Length, alignedCore.Length));
+                    driveStream.Write(alignedCore, 0, alignedCore.Length);
+
+                    // Partition 2 offset
+                    ulong part2StartSector = mbr.PartTbl[1].StartSectorId;
+                    Console.WriteLine($"Step 5: Writing VTOYEFI FAT image to partition 2 at LBA {part2StartSector}...");
+                    driveStream.Position = (long)(part2StartSector * 512);
+                    driveStream.Write(fatImgBytes, 0, fatImgBytes.Length);
+                }
+                else
+                {
+                    // GPT Style installation
+                    GptInfo gpt = PartitionService.FillGpt(disk.SizeInBytes, bootImgBytes);
+                    byte[] gptBytes = gpt.Serialize();
+                    driveStream.Position = 0;
+                    driveStream.Write(gptBytes, 0, gptBytes.Length);
+
+                    Console.WriteLine("Step 4: Writing grub stage 2 core.img to sector 34 (updating blocklist)...");
+                    // Modify byte 500 of core.img to 35 in GPT style
+                    coreImgBytes[500] = 35;
+                    driveStream.Position = 34 * 512;
+                    byte[] alignedCore = new byte[1024 * 1024 - 34 * 512];
+                    Array.Copy(coreImgBytes, 0, alignedCore, 0, Math.Min(coreImgBytes.Length, alignedCore.Length));
+                    driveStream.Write(alignedCore, 0, alignedCore.Length);
+
+                    // Partition 2 offset
+                    ulong part2StartSector = gpt.PartTbl[1].StartLBA;
+                    Console.WriteLine($"Step 5: Writing VTOYEFI FAT image to partition 2 at LBA {part2StartSector}...");
+                    driveStream.Position = (long)(part2StartSector * 512);
+                    driveStream.Write(fatImgBytes, 0, fatImgBytes.Length);
+
+                    // Backup GPT
+                    Console.WriteLine("Step 6: Writing Backup GPT header and partition array to end of disk...");
+                    GptHeader backupHead = PartitionService.CreateBackupGptHeader(gpt);
+                    byte[] backupHeadBytes = backupHead.Serialize();
+
+                    byte[] partArrayBytes = new byte[128 * 128];
+                    for (int i = 0; i < 128; i++)
+                    {
+                        byte[] entryBytes = gpt.PartTbl[i].Serialize();
+                        Array.Copy(entryBytes, 0, partArrayBytes, i * 128, 128);
+                    }
+
+                    // Write backup partition array at TotalSectors - 33
+                    ulong backupPartArrayLba = (disk.SizeInBytes / 512) - 33;
+                    driveStream.Position = (long)(backupPartArrayLba * 512);
+                    driveStream.Write(partArrayBytes, 0, partArrayBytes.Length);
+
+                    // Write backup header at TotalSectors - 1
+                    ulong backupHeaderLba = (disk.SizeInBytes / 512) - 1;
+                    driveStream.Position = (long)(backupHeaderLba * 512);
+                    driveStream.Write(backupHeadBytes, 0, 512);
+                }
+
+                driveStream.Flush();
+            }
+
+            Console.WriteLine("Step 7: Formatting Partition 1 with exFAT filesystem...");
+            FormatPartition1(disk);
+        }
+
+        static void ExecuteUpdate(PhysicalDisk disk, bool secureBoot)
+        {
+            string baseDir = AppContext.BaseDirectory;
+            string bootImgPath = Path.Combine(baseDir, "boot", "boot.img");
+            string coreImgXzPath = Path.Combine(baseDir, "boot", "core.img.xz");
+            string diskImgXzPath = Path.Combine(baseDir, "ventoy", "ventoy.disk.img.xz");
+
+            VerifyAssetExists(bootImgPath);
+            VerifyAssetExists(coreImgXzPath);
+            VerifyAssetExists(diskImgXzPath);
+
+            Console.WriteLine("Step 1: Reading and decompressing binary bootloader assets...");
+            byte[] bootImgBytes = File.ReadAllBytes(bootImgPath);
+            byte[] coreImgBytes = Decompressor.DecompressXz(coreImgXzPath);
+            byte[] fatImgBytes = Decompressor.DecompressXz(diskImgXzPath);
+
+            if (!secureBoot)
+            {
+                fatImgBytes = ModifySecureBoot(fatImgBytes);
+            }
+
+            Console.WriteLine("Step 2: Checking existing Ventoy installation on the disk...");
+            bool isGpt = false;
+            ulong part2StartSector = 0;
+
+            using (Stream driveStream = DiskService.OpenWriteHandle(disk))
+            {
+                byte[] sector0 = new byte[512];
+                driveStream.Read(sector0, 0, 512);
+
+                if (sector0[510] != 0x55 || sector0[511] != 0xAA)
+                {
+                    throw new Exception("Error: The target disk does not have a valid boot sector signature (0x55AA).");
+                }
+
+                // Check FsFlag of partition 1 to detect Protective MBR
+                isGpt = (sector0[446 + 4] == 0xEE);
+
+                if (!isGpt)
+                {
+                    MbrHead mbr = MbrHead.Deserialize(sector0);
+                    part2StartSector = mbr.PartTbl[1].StartSectorId;
+                    if (part2StartSector == 0 || mbr.PartTbl[1].FsFlag != 0xEF)
+                    {
+                        throw new Exception("Error: Existing Ventoy MBR partition table structure not found on this disk.");
+                    }
+
+                    Console.WriteLine($"Detected Ventoy MBR installation. VTOYEFI starts at sector {part2StartSector}.");
+                    Console.WriteLine("Step 3: Writing MBR boot code...");
+                    // Merge new boot code with old partition table entries
+                    MbrHead newMbr = PartitionService.FillMbr(disk.SizeInBytes, bootImgBytes, 0x07);
+                    newMbr.PartTbl = mbr.PartTbl; // Preserve existing partitions!
+                    byte[] newMbrBytes = newMbr.Serialize();
+
+                    driveStream.Position = 0;
+                    driveStream.Write(newMbrBytes, 0, 512);
+
+                    Console.WriteLine("Step 4: Writing grub stage 2 core.img to sector 1...");
+                    driveStream.Position = 512;
+                    byte[] alignedCore = new byte[1024 * 1024 - 512];
+                    Array.Copy(coreImgBytes, 0, alignedCore, 0, Math.Min(coreImgBytes.Length, alignedCore.Length));
+                    driveStream.Write(alignedCore, 0, alignedCore.Length);
+                }
+                else
+                {
+                    // GPT style update
+                    byte[] gptBytes = new byte[17408];
+                    driveStream.Position = 0;
+                    driveStream.Read(gptBytes, 0, 17408);
+
+                    GptInfo existingGpt = new GptInfo();
+                    existingGpt.Mbr = MbrHead.Deserialize(gptBytes);
+                    existingGpt.Head = GptHeader.Deserialize(gptBytes.AsSpan(512, 512).ToArray());
+                    for (int i = 0; i < 128; i++)
+                    {
+                        existingGpt.PartTbl[i] = GptPartEntry.Deserialize(gptBytes, 1024 + (i * 128));
+                    }
+
+                    part2StartSector = existingGpt.PartTbl[1].StartLBA;
+                    if (part2StartSector == 0)
+                    {
+                        throw new Exception("Error: Existing Ventoy GPT partition table structure not found on this disk.");
+                    }
+
+                    Console.WriteLine($"Detected Ventoy GPT installation. VTOYEFI starts at sector {part2StartSector}.");
+                    Console.WriteLine("Step 3: Writing GPT primary structures...");
+                    
+                    GptInfo newGpt = PartitionService.FillGpt(disk.SizeInBytes, bootImgBytes);
+                    // Preserve the exact partition mappings
+                    newGpt.PartTbl = existingGpt.PartTbl;
+
+                    // Recalculate primary GPT header values
+                    newGpt.Head.DiskGuid = existingGpt.Head.DiskGuid; // keep disk GUID
+                    
+                    byte[] partArrayBytes = new byte[128 * 128];
+                    for (int i = 0; i < 128; i++)
+                    {
+                        byte[] entryBytes = newGpt.PartTbl[i].Serialize();
+                        Array.Copy(entryBytes, 0, partArrayBytes, i * 128, 128);
+                    }
+                    newGpt.Head.PartTblCrc = PartitionService.CalculateCrc32(partArrayBytes, 0, partArrayBytes.Length);
+
+                    byte[] newHeadBytes = newGpt.Head.Serialize();
+                    Array.Clear(newHeadBytes, 16, 4);
+                    newGpt.Head.Crc = PartitionService.CalculateCrc32(newHeadBytes, 0, 92);
+
+                    byte[] newGptBytes = newGpt.Serialize();
+                    driveStream.Position = 0;
+                    driveStream.Write(newGptBytes, 0, newGptBytes.Length);
+
+                    Console.WriteLine("Step 4: Writing grub stage 2 core.img to sector 34 (updating blocklist)...");
+                    coreImgBytes[500] = 35;
+                    driveStream.Position = 34 * 512;
+                    byte[] alignedCore = new byte[1024 * 1024 - 34 * 512];
+                    Array.Copy(coreImgBytes, 0, alignedCore, 0, Math.Min(coreImgBytes.Length, alignedCore.Length));
+                    driveStream.Write(alignedCore, 0, alignedCore.Length);
+
+                    // Backup GPT
+                    Console.WriteLine("Step 5: Writing Backup GPT header and partition array to end of disk...");
+                    GptHeader backupHead = PartitionService.CreateBackupGptHeader(newGpt);
+                    byte[] backupHeadBytes = backupHead.Serialize();
+
+                    ulong backupPartArrayLba = (disk.SizeInBytes / 512) - 33;
+                    driveStream.Position = (long)(backupPartArrayLba * 512);
+                    driveStream.Write(partArrayBytes, 0, partArrayBytes.Length);
+
+                    ulong backupHeaderLba = (disk.SizeInBytes / 512) - 1;
+                    driveStream.Position = (long)(backupHeaderLba * 512);
+                    driveStream.Write(backupHeadBytes, 0, 512);
+                }
+
+                Console.WriteLine($"Step 5: Writing VTOYEFI FAT image to partition 2 at LBA {part2StartSector}...");
+                driveStream.Position = (long)(part2StartSector * 512);
+                driveStream.Write(fatImgBytes, 0, fatImgBytes.Length);
+
+                driveStream.Flush();
+            }
+        }
+
+        static void VerifyAssetExists(string path)
+        {
+            if (!File.Exists(path))
+            {
+                throw new FileNotFoundException($"Required binary asset file not found: {Path.GetFileName(path)}. Build the assets or download the latest release first.");
+            }
+        }
+
+        static byte[] ModifySecureBoot(byte[] fatImgBytes)
+        {
+            Console.WriteLine("Secure Boot toggle: disabled. Modifying VTOYEFI FAT image...");
+            using (var fatStream = new MemoryStream())
+            {
+                fatStream.Write(fatImgBytes, 0, fatImgBytes.Length);
+                fatStream.Position = 0;
+
+                using (var fs = new DiscUtils.Fat.FatFileSystem(fatStream))
+                {
+                    // Process x64 EFI files
+                    string grubx64Path = @"EFI\BOOT\grubx64_real.efi";
+                    if (fs.FileExists(grubx64Path))
+                    {
+                        byte[] grubx64Bytes;
+                        using (var fileStream = fs.OpenFile(grubx64Path, FileMode.Open, FileAccess.Read))
+                        {
+                            grubx64Bytes = new byte[fileStream.Length];
+                            fileStream.Read(grubx64Bytes, 0, grubx64Bytes.Length);
+                        }
+
+                        DeleteFileIfExists(fs, @"EFI\BOOT\BOOTX64.EFI");
+                        DeleteFileIfExists(fs, @"EFI\BOOT\grubx64.efi");
+                        DeleteFileIfExists(fs, @"EFI\BOOT\grubx64_real.efi");
+                        DeleteFileIfExists(fs, @"EFI\BOOT\MokManager.efi");
+                        DeleteFileIfExists(fs, @"EFI\BOOT\mmx64.efi");
+                        DeleteFileIfExists(fs, @"ENROLL_THIS_KEY_IN_MOKMANAGER.cer");
+                        DeleteFileIfExists(fs, @"EFI\BOOT\grub.efi");
+
+                        using (var fileStream = fs.OpenFile(@"EFI\BOOT\BOOTX64.EFI", FileMode.Create, FileAccess.Write))
+                        {
+                            fileStream.Write(grubx64Bytes, 0, grubx64Bytes.Length);
+                        }
+                        Console.WriteLine(" -> Successfully toggled Secure Boot OFF for x64.");
+                    }
+
+                    // Process ia32 EFI files
+                    string grubia32Path = @"EFI\BOOT\grubia32_real.efi";
+                    if (fs.FileExists(grubia32Path))
+                    {
+                        byte[] grubia32Bytes;
+                        using (var fileStream = fs.OpenFile(grubia32Path, FileMode.Open, FileAccess.Read))
+                        {
+                            grubia32Bytes = new byte[fileStream.Length];
+                            fileStream.Read(grubia32Bytes, 0, grubia32Bytes.Length);
+                        }
+
+                        DeleteFileIfExists(fs, @"EFI\BOOT\BOOTIA32.EFI");
+                        DeleteFileIfExists(fs, @"EFI\BOOT\grubia32.efi");
+                        DeleteFileIfExists(fs, @"EFI\BOOT\grubia32_real.efi");
+                        DeleteFileIfExists(fs, @"EFI\BOOT\mmia32.efi");
+
+                        using (var fileStream = fs.OpenFile(@"EFI\BOOT\BOOTIA32.EFI", FileMode.Create, FileAccess.Write))
+                        {
+                            fileStream.Write(grubia32Bytes, 0, grubia32Bytes.Length);
+                        }
+                        Console.WriteLine(" -> Successfully toggled Secure Boot OFF for ia32.");
+                    }
+                }
+
+                return fatStream.ToArray();
+            }
+        }
+
+        private static void DeleteFileIfExists(DiscUtils.Fat.FatFileSystem fs, string path)
+        {
+            if (fs.FileExists(path))
+            {
+                fs.DeleteFile(path);
+            }
+        }
+
+        static void FormatPartition1(PhysicalDisk disk)
+        {
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                Console.WriteLine("Formatting Partition 1 as exFAT (Windows diskpart)...");
+                string script = $"select disk {disk.Number}\nselect partition 1\nformat fs=exfat label=Ventoy quick\n";
+                string tempFile = Path.GetTempFileName();
+                File.WriteAllText(tempFile, script);
+
+                try
+                {
+                    var psi = new System.Diagnostics.ProcessStartInfo("diskpart", $"/s \"{tempFile}\"")
+                    {
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true
+                    };
+                    using var proc = System.Diagnostics.Process.Start(psi);
+                    proc?.WaitForExit();
+                    string output = proc?.StandardOutput.ReadToEnd() ?? "";
+                    Console.WriteLine(output);
+                }
+                finally
+                {
+                    File.Delete(tempFile);
+                }
+            }
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            {
+                // Reread partition table
+                try
+                {
+                    var pprobe = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("partprobe", disk.Path) { UseShellExecute = false, CreateNoWindow = true });
+                    pprobe?.WaitForExit();
+                }
+                catch {}
+                try
+                {
+                    var bdev = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("blockdev", $"--rereadpt {disk.Path}") { UseShellExecute = false, CreateNoWindow = true });
+                    bdev?.WaitForExit();
+                }
+                catch {}
+
+                // Determine partition path
+                string partPath = disk.Path;
+                if (partPath.Contains("nvme"))
+                {
+                    partPath += "p1";
+                }
+                else
+                {
+                    partPath += "1";
+                }
+
+                Console.WriteLine($"Waiting for partition device file {partPath} to appear...");
+                bool partitionFound = false;
+                for (int i = 0; i < 20; i++)
+                {
+                    if (File.Exists(partPath))
+                    {
+                        partitionFound = true;
+                        break;
+                    }
+                    Thread.Sleep(250);
+                }
+
+                if (!partitionFound)
+                {
+                    throw new Exception($"Error: Partition device file '{partPath}' did not appear in time. Formatting failed.");
+                }
+
+                // Call architecture-appropriate mkexfatfs
+                string baseDir = AppContext.BaseDirectory;
+                string arch = RuntimeInformation.ProcessArchitecture switch
+                {
+                    Architecture.X64 => "x86_64",
+                    Architecture.Arm64 => "aarch64",
+                    Architecture.X86 => "i386",
+                    _ => "x86_64"
+                };
+
+                string mkexfatfsPath = Path.Combine(baseDir, "tool", arch, "mkexfatfs");
+                if (!File.Exists(mkexfatfsPath))
+                {
+                    throw new FileNotFoundException($"mkexfatfs tool not found at: {mkexfatfsPath}");
+                }
+
+                // Set executable permission
+                try
+                {
+                    var chmodPsi = new System.Diagnostics.ProcessStartInfo("chmod", $"+x \"{mkexfatfsPath}\"")
+                    {
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+                    using var proc = System.Diagnostics.Process.Start(chmodPsi);
+                    proc?.WaitForExit();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Warning: Failed to set executable permission on mkexfatfs: {ex.Message}");
+                }
+
+                Console.WriteLine($"Formatting Partition 1 ({partPath}) as exFAT using bundled {arch} mkexfatfs...");
+                var formatPsi = new System.Diagnostics.ProcessStartInfo(mkexfatfsPath, $"-n Ventoy {partPath}")
                 {
                     RedirectStandardOutput = true,
+                    RedirectStandardError = true,
                     UseShellExecute = false,
                     CreateNoWindow = true
                 };
-                using (var proc = Process.Start(psi))
+
+                using var formatProc = System.Diagnostics.Process.Start(formatPsi);
+                formatProc?.WaitForExit();
+                string output = formatProc?.StandardOutput.ReadToEnd() ?? "";
+                string error = formatProc?.StandardError.ReadToEnd() ?? "";
+                
+                if (formatProc?.ExitCode != 0)
                 {
-                    if (proc != null)
-                    {
-                        string output = proc.StandardOutput.ReadToEnd();
-                        proc.WaitForExit();
-                        using (var doc = JsonDocument.Parse(output))
-                        {
-                            if (doc.RootElement.TryGetProperty("blockdevices", out var devices))
-                            {
-                                foreach (var dev in devices.EnumerateArray())
-                                {
-                                    string name = dev.GetProperty("name").GetString() ?? string.Empty;
-                                    string type = dev.GetProperty("type").GetString() ?? string.Empty;
-                                    string tran = dev.TryGetProperty("tran", out var tranProp) ? (tranProp.GetString() ?? string.Empty) : string.Empty;
-                                    string model = dev.TryGetProperty("model", out var modelProp) ? (modelProp.GetString() ?? string.Empty) : "Unknown Model";
-                                    long size = dev.GetProperty("size").GetInt64();
-
-                                    if (type != "disk") continue;
-                                    if (name.StartsWith("loop") || name.StartsWith("ram") || name.StartsWith("dm-") || name.StartsWith("sr")) continue;
-
-                                    if (!showAll && tran != "usb") continue;
-
-                                    var info = new DiskInfo
-                                    {
-                                        Name = name,
-                                        Model = model,
-                                        SizeBytes = size,
-                                        HumanSize = FormatSize(size)
-                                    };
-                                    DetectVentoy(info);
-                                    list.Add(info);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error scanning Linux disks: {ex.Message}");
-            }
-            return list;
-        }
-
-        private static void DetectVentoy(DiskInfo info)
-        {
-            string devPath = $"/dev/{info.Name}";
-            if (!File.Exists(devPath)) return;
-
-            try
-            {
-                using (var fs = File.OpenRead(devPath))
-                {
-                    byte[] mbr = new byte[512];
-                    int read = fs.Read(mbr, 0, 512);
-                    if (read < 512) return;
-
-                    if (mbr[510] != 0x55 || mbr[511] != 0xAA) return;
-
-                    uint p1Start = BitConverter.ToUInt32(mbr, 454);
-                    uint p2Start = BitConverter.ToUInt32(mbr, 470);
-                    uint p2Size = BitConverter.ToUInt32(mbr, 474);
-
-                    bool isValid = false;
-                    int style = 0;
-
-                    if (p1Start == 2048 && p2Size == 65536)
-                    {
-                        isValid = true;
-                    }
-                    else
-                    {
-                        fs.Seek(512, SeekOrigin.Begin);
-                        byte[] gptHeader = new byte[92];
-                        fs.Read(gptHeader, 0, 92);
-                        string gptSig = Encoding.ASCII.GetString(gptHeader, 0, 8);
-                        if (gptSig == "EFI PART")
-                        {
-                            style = 1;
-                            fs.Seek(1152 + 56, SeekOrigin.Begin);
-                            byte[] nameBytes = new byte[72];
-                            fs.Read(nameBytes, 0, 72);
-                            string partName = Encoding.Unicode.GetString(nameBytes).TrimEnd('\0');
-                            if (partName == "VTOYEFI")
-                            {
-                                isValid = true;
-                            }
-                        }
-                    }
-
-                    if (isValid)
-                    {
-                        info.VtoyValid = 1;
-                        info.VtoyPartStyle = style;
-
-                        string partPath = $"{devPath}2";
-                        if (File.Exists(partPath))
-                        {
-                            string mountPoint = $"/tmp/vtoy_mnt_{info.Name}";
-                            try
-                            {
-                                Directory.CreateDirectory(mountPoint);
-                                var mountPsi = new ProcessStartInfo("mount", $"-o ro {partPath} {mountPoint}")
-                                {
-                                    RedirectStandardError = true,
-                                    UseShellExecute = false,
-                                    CreateNoWindow = true
-                                };
-                                using (var mountProc = Process.Start(mountPsi))
-                                {
-                                    mountProc?.WaitForExit();
-                                    if (mountProc?.ExitCode == 0)
-                                    {
-                                        string cfgPath = Path.Combine(mountPoint, "grub/grub.cfg");
-                                        if (File.Exists(cfgPath))
-                                        {
-                                            string cfgText = File.ReadAllText(cfgPath);
-                                            int idx = cfgText.IndexOf("VENTOY_VERSION=");
-                                            if (idx >= 0)
-                                            {
-                                                int startIdx = idx + "VENTOY_VERSION=".Length;
-                                                if (startIdx < cfgText.Length && cfgText[startIdx] == '"') startIdx++;
-                                                int endIdx = startIdx;
-                                                while (endIdx < cfgText.Length && cfgText[endIdx] != '"' && cfgText[endIdx] != '\r' && cfgText[endIdx] != '\n')
-                                                {
-                                                    endIdx++;
-                                                }
-                                                info.VtoyVer = cfgText.Substring(startIdx, endIdx - startIdx);
-                                            }
-                                        }
-                                        string realEfiPath = Path.Combine(mountPoint, "EFI/BOOT/grubx64_real.efi");
-                                        info.VtoySecureBoot = File.Exists(realEfiPath) ? 1 : 0;
-                                    }
-                                }
-                            }
-                            finally
-                            {
-                                var umountPsi = new ProcessStartInfo("umount", mountPoint)
-                                {
-                                    UseShellExecute = false,
-                                    CreateNoWindow = true
-                                };
-                                using (var umountProc = Process.Start(umountPsi))
-                                {
-                                    umountProc?.WaitForExit();
-                                }
-                                try { Directory.Delete(mountPoint); } catch { }
-                            }
-                        }
-                    }
-                }
-            }
-            catch { }
-        }
-
-        // Windows device detection
-        public static List<DiskInfo> GetWindowsDisks(bool showAll)
-        {
-            var list = new List<DiskInfo>();
-            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return list;
-
-            uint drives = Win32.GetLogicalDrives();
-            for (int i = 0; i < 26; i++)
-            {
-                if ((drives & (1 << i)) != 0)
-                {
-                    char letter = (char)('A' + i);
-                    try
-                    {
-                        var driveInfo = new DriveInfo(letter.ToString());
-                        if (!driveInfo.IsReady) continue;
-
-                        if (!showAll && driveInfo.DriveType != DriveType.Removable) continue;
-
-                        string volPath = $@"\\.\{letter}:";
-                        IntPtr hVol = Win32.CreateFile(volPath, Win32.GENERIC_READ, Win32.FILE_SHARE_READ | Win32.FILE_SHARE_WRITE, IntPtr.Zero, Win32.OPEN_EXISTING, 0, IntPtr.Zero);
-                        if (hVol != Win32.INVALID_HANDLE_VALUE)
-                        {
-                            Win32.VOLUME_DISK_EXTENTS extents = new Win32.VOLUME_DISK_EXTENTS();
-                            uint bytesReturned;
-                            bool success = Win32.DeviceIoControl(
-                                hVol,
-                                Win32.IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
-                                IntPtr.Zero, 0,
-                                ref extents,
-                                24,
-                                out bytesReturned,
-                                IntPtr.Zero);
-                            Win32.CloseHandle(hVol);
-
-                            if (success)
-                            {
-                                uint diskNum = extents.Extent.DiskNumber;
-                                var info = new DiskInfo
-                                {
-                                    Name = $"PhysicalDrive{diskNum}",
-                                    Model = driveInfo.VolumeLabel + $" (Drive {letter}:)",
-                                    SizeBytes = driveInfo.TotalSize,
-                                    HumanSize = FormatSize(driveInfo.TotalSize)
-                                };
-                                DetectVentoyWindows(info, letter);
-                                list.Add(info);
-                            }
-                        }
-                    }
-                    catch { }
-                }
-            }
-            return list;
-        }
-
-        private static void DetectVentoyWindows(DiskInfo info, char driveLetter)
-        {
-            string physPath = $@"\\.\{info.Name}";
-            IntPtr hPhys = Win32.CreateFile(physPath, Win32.GENERIC_READ, Win32.FILE_SHARE_READ | Win32.FILE_SHARE_WRITE, IntPtr.Zero, Win32.OPEN_EXISTING, 0, IntPtr.Zero);
-            if (hPhys == Win32.INVALID_HANDLE_VALUE) return;
-
-            try
-            {
-                byte[] mbr = new byte[512];
-                uint bytesRead;
-                bool success = Win32.ReadFile(hPhys, mbr, 512, out bytesRead, IntPtr.Zero);
-                if (!success || bytesRead < 512) return;
-
-                if (mbr[510] != 0x55 || mbr[511] != 0xAA) return;
-
-                uint p1Start = BitConverter.ToUInt32(mbr, 454);
-                uint p2Start = BitConverter.ToUInt32(mbr, 470);
-                uint p2Size = BitConverter.ToUInt32(mbr, 474);
-
-                bool isValid = false;
-                int style = 0;
-
-                if (p1Start == 2048 && p2Size == 65536)
-                {
-                    isValid = true;
-                }
-                else
-                {
-                    byte[] gptHeader = new byte[92];
-                    Win32.ReadFile(hPhys, gptHeader, 92, out bytesRead, IntPtr.Zero);
-                    string gptSig = Encoding.ASCII.GetString(gptHeader, 0, 8);
-                    if (gptSig == "EFI PART")
-                    {
-                        style = 1;
-                        isValid = true; // basic heuristic
-                    }
+                    throw new Exception($"Formatting failed with exit code {formatProc?.ExitCode}. Stderr: {error}. Stdout: {output}");
                 }
 
-                if (isValid)
-                {
-                    info.VtoyValid = 1;
-                    info.VtoyPartStyle = style;
-                    info.VtoyVer = "1.0.99";
-
-                    // Try checking config path if accessible on logical drive
-                    string cfg = $"{driveLetter}:\\grub\\grub.cfg";
-                    if (File.Exists(cfg))
-                    {
-                        string cfgText = File.ReadAllText(cfg);
-                        int idx = cfgText.IndexOf("VENTOY_VERSION=");
-                        if (idx >= 0)
-                        {
-                            int startIdx = idx + "VENTOY_VERSION=".Length;
-                            if (startIdx < cfgText.Length && cfgText[startIdx] == '"') startIdx++;
-                            int endIdx = startIdx;
-                            while (endIdx < cfgText.Length && cfgText[endIdx] != '"' && cfgText[endIdx] != '\r' && cfgText[endIdx] != '\n')
-                            {
-                                endIdx++;
-                            }
-                            info.VtoyVer = cfgText.Substring(startIdx, endIdx - startIdx);
-                        }
-                    }
-                }
+                Console.WriteLine("exFAT partition formatted successfully!");
             }
-            catch { }
-            finally
-            {
-                Win32.CloseHandle(hPhys);
-            }
-        }
-
-        public static string GetVentoyVersion()
-        {
-            try
-            {
-                string installDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ventoy");
-                string path = Path.Combine(installDir, "ventoy", "version");
-                if (File.Exists(path)) return File.ReadAllText(path).Trim();
-            }
-            catch { }
-            return "1.0.99";
-        }
-
-        // Wipe sectors natively (Clean operation)
-        private static void WipeDiskSectors(string diskPath)
-        {
-            try
-            {
-                using (var fs = File.Open(diskPath, FileMode.Open, FileAccess.ReadWrite))
-                {
-                    byte[] zeroes = new byte[1024 * 1024];
-                    fs.Write(zeroes, 0, zeroes.Length);
-
-                    try
-                    {
-                        long size = fs.Length;
-                        if (size > zeroes.Length)
-                        {
-                            fs.Seek(size - zeroes.Length, SeekOrigin.Begin);
-                            fs.Write(zeroes, 0, zeroes.Length);
-                        }
-                    }
-                    catch { }
-                    fs.Flush();
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error wiping sectors on {diskPath}: {ex.Message}");
-                throw;
-            }
-        }
-
-        // Install / Update / Clean subprocess execution
-        public static void StartBackgroundOperation(string type, string diskName, int style, int secureBoot, string reserveSpace, string fsType)
-        {
-            lock (_progressLock)
-            {
-                _percent = 0;
-                _processDisk = diskName;
-                _processType = type;
-                _processResult = "success";
-            }
-
-            Task.Run(async () =>
-            {
-                try
-                {
-                    if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                    {
-                        string driveIdx = string.Concat(diskName.Where(char.IsDigit));
-                        if (string.IsNullOrEmpty(driveIdx)) driveIdx = "1";
-
-                        string args = "VTOYCLI";
-                        if (type == "install") args += " /I";
-                        else if (type == "update") args += " /U";
-                        else
-                        {
-                            WipeDiskSectors(diskName);
-                            lock (_progressLock) { _percent = 100; _processResult = "success"; }
-                            return;
-                        }
-
-                        args += $" /PhyDrive:{driveIdx}";
-                        if (style == 1) args += " /GPT";
-                        if (secureBoot == 0) args += " /NOSB";
-                        if (fsType.Equals("ntfs", StringComparison.OrdinalIgnoreCase)) args += " /FS:NTFS";
-
-                        string installDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ventoy");
-                        if (long.TryParse(reserveSpace, out long bytes) && bytes > 0)
-                        {
-                            long mb = bytes / (1024 * 1024);
-                            args += $" /R:{mb}";
-                        }
-
-                        var psi = new ProcessStartInfo("Ventoy2Disk.exe", args)
-                        {
-                            WorkingDirectory = installDir,
-                            UseShellExecute = false,
-                            CreateNoWindow = true
-                        };
-                        string workDir = psi.WorkingDirectory;
-                        string percentFile = Path.Combine(workDir, "cli_percent.txt");
-                        string doneFile = Path.Combine(workDir, "cli_done.txt");
-                        string logFile = Path.Combine(workDir, "cli_log.txt");
-                        try { File.Delete(percentFile); File.Delete(doneFile); File.Delete(logFile); } catch { }
-
-                        using (var proc = Process.Start(psi))
-                        {
-                            if (proc == null) throw new Exception("Failed to start Ventoy2Disk.exe");
-
-                            while (!proc.HasExited)
-                            {
-                                await Task.Delay(500);
-                                if (File.Exists(percentFile))
-                                {
-                                    try
-                                    {
-                                        string text = File.ReadAllText(percentFile).Trim();
-                                        if (int.TryParse(text, out int p))
-                                        {
-                                            lock (_progressLock) { _percent = p; }
-                                        }
-                                    }
-                                    catch { }
-                                }
-                            }
-                            proc.WaitForExit();
-
-                            for (int i = 0; i < 10 && !File.Exists(doneFile); i++)
-                            {
-                                await Task.Delay(500);
-                            }
-
-                            if (File.Exists(doneFile))
-                            {
-                                string doneText = File.ReadAllText(doneFile).Trim();
-                                lock (_progressLock)
-                                {
-                                    _percent = 100;
-                                    _processResult = doneText == "0" ? "success" : "failed";
-                                }
-                            }
-                            else
-                            {
-                                lock (_progressLock)
-                                {
-                                    _percent = 100;
-                                    _processResult = proc.ExitCode == 0 ? "success" : "failed";
-                                }
-                            }
-                        }
-                    }
-                    else // Linux Native C# worker replacing Ventoy2Disk.sh
-                    {
-                        try
-                        {
-                            if (diskName.StartsWith("/dev/"))
-                            {
-                                diskName = diskName.Substring(5);
-                            }
-                            string diskPath = $"/dev/{diskName}";
-                            if (!File.Exists(diskPath))
-                            {
-                                throw new Exception($"Disk device {diskPath} does not exist.");
-                            }
-
-                            if (type == "clean")
-                            {
-                                WipeDiskSectors(diskPath);
-                                lock (_progressLock) { _percent = 100; _processResult = "success"; }
-                                return;
-                            }
-
-                            string toolDir = GetToolDir();
-                            string installDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ventoy");
-                            string vtoycliPath = Path.Combine(installDir, "tool", toolDir, "vtoycli");
-                            string xzcatPath = Path.Combine(installDir, "tool", toolDir, "xzcat");
-                            if (!File.Exists(xzcatPath)) xzcatPath = "xzcat";
-                            else RunCommand("chmod", $"+x {xzcatPath}", out _, out _);
-                            if (File.Exists(vtoycliPath)) RunCommand("chmod", $"+x {vtoycliPath}", out _, out _);
-
-                            // Umount all disk partitions
-                            UmountDisk(diskName);
-
-                            if (type == "install")
-                            {
-                                lock (_progressLock) { _percent = 5; }
-                                // Zero out partition table first
-                                ZeroDiskHeader(diskPath);
-
-                                lock (_progressLock) { _percent = 10; }
-
-                                // Read sector size and sector count
-                                long sectorCount = long.Parse(File.ReadAllText($"/sys/class/block/{diskName}/size").Trim());
-                                long reserveMb = 0;
-                                if (long.TryParse(reserveSpace, out long rsvBytes) && rsvBytes > 0)
-                                {
-                                    reserveMb = rsvBytes / (1024 * 1024);
-                                }
-
-                                // Space check
-                                long minSectors = 32 * 2048 + 2048; // partition 2 (32MB) + partition 1 start (1MB)
-                                if (sectorCount <= minSectors)
-                                {
-                                    throw new Exception("No enough space in disk");
-                                }
-
-                                // Layout calculation
-                                long part1_start_sector = 2048;
-                                long part1_end_sector = 0;
-                                long part2_start_sector = 0;
-                                long part2_end_sector = 0;
-
-                                if (style == 1) // GPT
-                                {
-                                    if (reserveMb > 0)
-                                    {
-                                        long reserve_sector_num = reserveMb * 2048 + 33;
-                                        part1_end_sector = sectorCount - reserve_sector_num - 65536 - 1;
-                                    }
-                                    else
-                                    {
-                                        part1_end_sector = sectorCount - 65536 - 34;
-                                    }
-                                }
-                                else // MBR
-                                {
-                                    if (reserveMb > 0)
-                                    {
-                                        long reserve_sector_num = reserveMb * 2048;
-                                        part1_end_sector = sectorCount - reserve_sector_num - 65536 - 1;
-                                    }
-                                    else
-                                    {
-                                        part1_end_sector = sectorCount - 65536 - 1;
-                                    }
-                                }
-
-                                part2_start_sector = part1_end_sector + 1;
-                                long modsector = part2_start_sector % 8;
-                                if (modsector > 0)
-                                {
-                                    part1_end_sector -= modsector;
-                                    part2_start_sector = part1_end_sector + 1;
-                                }
-                                part2_end_sector = part2_start_sector + 65536 - 1;
-
-                                lock (_progressLock) { _percent = 20; }
-
-                                // Create partitions using parted
-                                int partedExit = -1;
-                                if (style == 1) // GPT
-                                {
-                                    string vt_set_efi_type = (toolDir != "aarch64") ? "set 2 msftdata on" : "";
-                                    string partedArgs = $"-a none --script {diskPath} mklabel gpt unit s mkpart Ventoy ntfs {part1_start_sector} {part1_end_sector} mkpart VTOYEFI fat16 {part2_start_sector} {part2_end_sector} {vt_set_efi_type} quit";
-                                    partedExit = RunCommand("parted", partedArgs, out _, out _);
-                                }
-                                else // MBR
-                                {
-                                    string partedArgs = $"-a none --script {diskPath} mklabel msdos unit s mkpart primary ntfs {part1_start_sector} {part1_end_sector} mkpart primary fat16 {part2_start_sector} {part2_end_sector} set 1 boot on quit";
-                                    partedExit = RunCommand("parted", partedArgs, out _, out _);
-                                }
-
-                                if (partedExit != 0)
-                                {
-                                    throw new Exception("Parted failed to partition the disk.");
-                                }
-
-                                lock (_progressLock) { _percent = 30; }
-
-                                if (style == 0) // MBR: write 0xEF to offset 466
-                                {
-                                    using (var fs = File.OpenWrite(diskPath))
-                                    {
-                                        fs.Position = 466;
-                                        fs.WriteByte(0xEF);
-                                        fs.Flush();
-                                    }
-                                }
-                                else // GPT: run vtoycli gpt
-                                {
-                                    RunCommand(vtoycliPath, $"gpt -f {diskPath}", out _, out _);
-                                }
-
-                                // Trigger partition table reload
-                                RunCommand("udevadm", "trigger", out _, out _);
-                                RunCommand("partprobe", "", out _, out _);
-                                RunCommand("partx", $"-u {diskPath}", out _, out _);
-                                await Task.Delay(3000);
-
-                                lock (_progressLock) { _percent = 40; }
-
-                                string part1Path = GetPartName(diskPath, 1);
-                                string part2Path = GetPartName(diskPath, 2);
-
-                                // Wait for partitions to appear
-                                bool partsExist = false;
-                                for (int i = 0; i < 10; i++)
-                                {
-                                    if (File.Exists(part1Path) && File.Exists(part2Path))
-                                    {
-                                        partsExist = true;
-                                        break;
-                                    }
-                                    await Task.Delay(1000);
-                                }
-                                if (!partsExist)
-                                {
-                                    throw new Exception("Partition block devices failed to appear.");
-                                }
-
-                                lock (_progressLock) { _percent = 50; }
-
-                                // Format Partition 2 (EFI FAT)
-                                bool efiFormatSuccess = false;
-                                for (int i = 0; i < 5; i++)
-                                {
-                                    RunCommand("umount", part2Path, out _, out _);
-                                    int exitVal = RunCommand("mkfs.vfat", $"-F 16 -n VTOYEFI -s 1 {part2Path}", out _, out _);
-                                    if (exitVal == 0) { efiFormatSuccess = true; break; }
-                                    await Task.Delay(2000);
-                                }
-                                if (!efiFormatSuccess)
-                                {
-                                    throw new Exception("Failed to format EFI Partition 2.");
-                                }
-
-                                lock (_progressLock) { _percent = 60; }
-
-                                // Format Partition 1 (Data NTFS/exFAT)
-                                bool dataFormatSuccess = false;
-                                for (int i = 0; i < 5; i++)
-                                {
-                                    RunCommand("umount", part1Path, out _, out _);
-                                    int exitVal = -1;
-                                    if (fsType.Equals("ntfs", StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        string mkfsNtfsPath = Path.Combine(installDir, "tool", toolDir, "mkfs.ntfs");
-                                        if (File.Exists(mkfsNtfsPath))
-                                        {
-                                            RunCommand("chmod", $"+x {mkfsNtfsPath}", out _, out _);
-                                            exitVal = RunCommand(mkfsNtfsPath, $"-f -F -L \"Ventoy\" {part1Path}", out _, out _);
-                                        }
-                                        else
-                                        {
-                                            exitVal = RunCommand("mkfs.ntfs", $"-f -F -L \"Ventoy\" {part1Path}", out _, out _);
-                                        }
-                                    }
-                                    else
-                                    {
-                                        long diskSizeGb = sectorCount / 2097152;
-                                        int clusterSectors = (diskSizeGb > 32) ? 256 : 64;
-                                        string mkexfatfsPath = Path.Combine(installDir, "tool", toolDir, "mkexfatfs");
-                                        if (File.Exists(mkexfatfsPath))
-                                        {
-                                            RunCommand("chmod", $"+x {mkexfatfsPath}", out _, out _);
-                                            exitVal = RunCommand(mkexfatfsPath, $"-n \"Ventoy\" -s {clusterSectors} {part1Path}", out _, out _);
-                                        }
-                                        else
-                                        {
-                                            exitVal = RunCommand("mkexfatfs", $"-n \"Ventoy\" -s {clusterSectors} {part1Path}", out _, out _);
-                                        }
-                                    }
-                                    if (exitVal == 0) { dataFormatSuccess = true; break; }
-                                    await Task.Delay(2000);
-                                }
-                                if (!dataFormatSuccess)
-                                {
-                                    throw new Exception("Failed to format Data Partition 1.");
-                                }
-
-                                lock (_progressLock) { _percent = 70; }
-
-                                // Write boot.img, core.img, ventoy.disk.img and GUIDs
-                                using (var fs = File.OpenWrite(diskPath))
-                                {
-                                    // 1. Write first 446 bytes of boot.img
-                                    string bootImgPath = Path.Combine(installDir, "boot", "boot.img");
-                                    byte[] bootBytes = File.ReadAllBytes(bootImgPath);
-                                    fs.Position = 0;
-                                    fs.Write(bootBytes, 0, 446);
-
-                                    // 2. Write core.img
-                                    string coreImgXz = Path.Combine(installDir, "boot", "core.img.xz");
-                                    if (style == 1) // GPT
-                                    {
-                                        fs.Position = 92;
-                                        fs.WriteByte(0x22);
-                                        fs.Position = 34 * 512;
-                                        DecompressAndWrite(coreImgXz, xzcatPath, fs);
-                                        fs.Position = 17908;
-                                        fs.WriteByte(0x23);
-                                    }
-                                    else // MBR
-                                    {
-                                        fs.Position = 512;
-                                        DecompressAndWrite(coreImgXz, xzcatPath, fs);
-                                    }
-
-                                    // 3. Write ventoy.disk.img
-                                    string ventoyDiskXz = Path.Combine(installDir, "ventoy", "ventoy.disk.img.xz");
-                                    fs.Position = part2_start_sector * 512;
-                                    DecompressAndWrite(ventoyDiskXz, xzcatPath, fs);
-
-                                    // 4. Generate and write Disk UUID and signature
-                                    byte[] uuid = new byte[16];
-                                    Random.Shared.NextBytes(uuid);
-                                    fs.Position = 384;
-                                    fs.Write(uuid, 0, 16);
-                                    fs.Position = 440;
-                                    fs.Write(uuid, 12, 4);
-
-                                    fs.Flush();
-                                }
-
-                                lock (_progressLock) { _percent = 85; }
-
-                                // Esp partition resize for secure boot
-                                if (secureBoot != 1)
-                                {
-                                    RunCommand(vtoycliPath, $"partresize -s {diskPath} {part2_start_sector}", out _, out _);
-                                }
-
-                                RunCommand("sync", "", out _, out _);
-                                lock (_progressLock) { _percent = 100; _processResult = "success"; }
-                            }
-                            else if (type == "update")
-                            {
-                                lock (_progressLock) { _percent = 10; }
-
-                                using (var fs = File.Open(diskPath, FileMode.Open, FileAccess.ReadWrite))
-                                {
-                                    // 1. Read original disk UUID (16 bytes at 384)
-                                    byte[] savedUuid = new byte[16];
-                                    fs.Position = 384;
-                                    fs.ReadExactly(savedUuid, 0, 16);
-
-                                    // 2. Read original reserved data (8 sectors at 2040)
-                                    byte[] savedRsv = new byte[8 * 512];
-                                    fs.Position = 2040 * 512;
-                                    fs.ReadExactly(savedRsv, 0, savedRsv.Length);
-
-                                    // 3. Detect partition style from partition type byte at 450
-                                    fs.Position = 450;
-                                    int part1Type = fs.ReadByte();
-                                    bool isGpt = (part1Type == 0xEE);
-
-                                    lock (_progressLock) { _percent = 30; }
-
-                                    // 4. Write first 440 bytes of boot.img
-                                    string bootImgPath = Path.Combine(installDir, "boot", "boot.img");
-                                    byte[] bootBytes = File.ReadAllBytes(bootImgPath);
-                                    fs.Position = 0;
-                                    fs.Write(bootBytes, 0, 440);
-
-                                    // 5. Restore saved UUID
-                                    fs.Position = 384;
-                                    fs.Write(savedUuid, 0, 16);
-
-                                    // 6. Write core.img
-                                    string coreImgXz = Path.Combine(installDir, "boot", "core.img.xz");
-                                    if (isGpt)
-                                    {
-                                        fs.Position = 92;
-                                        fs.WriteByte(0x22);
-                                        fs.Position = 34 * 512;
-                                        DecompressAndWrite(coreImgXz, xzcatPath, fs);
-                                        fs.Position = 17908;
-                                        fs.WriteByte(0x23);
-                                    }
-                                    else
-                                    {
-                                        // If MBR, handle active flag
-                                        fs.Position = 446;
-                                        int part1Active = fs.ReadByte();
-                                        fs.Position = 462;
-                                        int part2Active = fs.ReadByte();
-                                        if (part1Active == 0x00 && part2Active == 0x80)
-                                        {
-                                            fs.Position = 446;
-                                            fs.WriteByte(0x80);
-                                            fs.Position = 462;
-                                            fs.WriteByte(0x00);
-                                        }
-
-                                        fs.Position = 512;
-                                        DecompressAndWrite(coreImgXz, xzcatPath, fs);
-                                    }
-
-                                    // 7. Restore reserved data
-                                    fs.Position = 2040 * 512;
-                                    fs.Write(savedRsv, 0, savedRsv.Length);
-
-                                    lock (_progressLock) { _percent = 60; }
-
-                                    // 8. Find part2 start sector
-                                    string part2Name = GetPartName(diskName, 2);
-                                    string startFile = $"/sys/class/block/{part2Name}/start";
-                                    if (!File.Exists(startFile))
-                                    {
-                                        throw new Exception($"Cannot find partition start info at {startFile}");
-                                    }
-                                    long part2_start_sector = long.Parse(File.ReadAllText(startFile).Trim());
-
-                                    // 9. Write ventoy.disk.img
-                                    string ventoyDiskXz = Path.Combine(installDir, "ventoy", "ventoy.disk.img.xz");
-                                    fs.Position = part2_start_sector * 512;
-                                    DecompressAndWrite(ventoyDiskXz, xzcatPath, fs);
-
-                                    fs.Flush();
-
-                                    lock (_progressLock) { _percent = 85; }
-
-                                    // Esp partition resize for secure boot
-                                    if (secureBoot != 1)
-                                    {
-                                        RunCommand(vtoycliPath, $"partresize -s {diskPath} {part2_start_sector}", out _, out _);
-                                    }
-
-                                    if (isGpt)
-                                    {
-                                        RunCommand(vtoycliPath, $"gpt -f {diskPath}", out _, out _);
-                                    }
-                                }
-
-                                RunCommand("sync", "", out _, out _);
-                                lock (_progressLock) { _percent = 100; _processResult = "success"; }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"Error during native Linux execution: {ex.Message}");
-                            lock (_progressLock) { _percent = 100; _processResult = "failed"; }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error: {ex.Message}");
-                    lock (_progressLock)
-                    {
-                        _percent = 100;
-                        _processResult = "failed";
-                    }
-                }
-            });
-        }
-
-        private static string GetToolDir()
-        {
-            var arch = RuntimeInformation.ProcessArchitecture;
-            if (arch == Architecture.Arm64) return "aarch64";
-            if (arch == Architecture.X64) return "x86_64";
-            try
-            {
-                var psi = new ProcessStartInfo("uname", "-m") { RedirectStandardOutput = true, UseShellExecute = false };
-                using var p = Process.Start(psi);
-                string m = p?.StandardOutput.ReadToEnd().Trim() ?? "";
-                p?.WaitForExit();
-                if (m.Contains("aarch64") || m.Contains("arm64")) return "aarch64";
-                if (m.Contains("x86_64") || m.Contains("amd64")) return "x86_64";
-                if (m.Contains("mips64")) return "mips64el";
-            }
-            catch {}
-            return "i386";
-        }
-
-        private static int RunCommand(string cmd, string args, out string output, out string error)
-        {
-            var psi = new ProcessStartInfo(cmd, args)
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            using var proc = Process.Start(psi);
-            if (proc == null)
-            {
-                output = "";
-                error = "Failed to start process";
-                return -1;
-            }
-            output = proc.StandardOutput.ReadToEnd();
-            error = proc.StandardError.ReadToEnd();
-            proc.WaitForExit();
-            return proc.ExitCode;
-        }
-
-        private static string GetPartName(string diskPath, int num)
-        {
-            if (diskPath.Contains("nvme") || diskPath.Contains("mmcblk") || diskPath.Contains("loop") || diskPath.Contains("md"))
-            {
-                return $"{diskPath}p{num}";
-            }
-            return $"{diskPath}{num}";
-        }
-
-        private static void ZeroDiskHeader(string diskPath)
-        {
-            using (var fs = File.OpenWrite(diskPath))
-            {
-                byte[] zeroes = new byte[32768]; // 64 sectors
-                fs.Position = 0;
-                fs.Write(zeroes, 0, zeroes.Length);
-                fs.Flush();
-            }
-        }
-
-        private static void UmountDisk(string diskName)
-        {
-            try
-            {
-                RunCommand("umount", $"-l /dev/{diskName}", out _, out _);
-                for (int i = 1; i <= 9; i++)
-                {
-                    RunCommand("umount", $"-l /dev/{diskName}{i}", out _, out _);
-                    RunCommand("umount", $"-l /dev/{diskName}p{i}", out _, out _);
-                }
-                var lines = File.ReadAllLines("/proc/mounts");
-                foreach (var line in lines)
-                {
-                    var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length > 0 && parts[0].Contains($"/dev/{diskName}"))
-                    {
-                        RunCommand("umount", $"-l {parts[0]}", out _, out _);
-                    }
-                }
-            }
-            catch {}
-        }
-
-        private static void DecompressAndWrite(string xzPath, string xzcatPath, Stream diskStream)
-        {
-            var psi = new ProcessStartInfo(xzcatPath, $"\"{xzPath}\"")
-            {
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            using var proc = Process.Start(psi);
-            if (proc != null)
-            {
-                using var outStream = proc.StandardOutput.BaseStream;
-                outStream.CopyTo(diskStream);
-                proc.WaitForExit();
-            }
-        }
-
-        // Plugson JSON operations
-        private static string GetConfigPath()
-        {
-            string targetDir = string.IsNullOrEmpty(_plugsonMountPoint) ? "." : _plugsonMountPoint;
-            return Path.Combine(targetDir, "ventoy", "ventoy.json");
-        }
-
-        private static JsonObject LoadConfig()
-        {
-            string path = GetConfigPath();
-            if (File.Exists(path))
-            {
-                try
-                {
-                    string content = File.ReadAllText(path);
-                    var node = JsonNode.Parse(content);
-                    if (node is JsonObject obj) return obj;
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error reading ventoy.json: {ex.Message}");
-                }
-            }
-            return new JsonObject();
-        }
-
-        private static void SaveConfig(JsonObject obj)
-        {
-            string path = GetConfigPath();
-            try
-            {
-                string? dir = Path.GetDirectoryName(path);
-                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-                {
-                    Directory.CreateDirectory(dir);
-                }
-                var options = new JsonSerializerOptions { WriteIndented = true };
-                string content = obj.ToJsonString(options);
-                File.WriteAllText(path, content);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error writing ventoy.json: {ex.Message}");
-            }
-        }
-
-        private static IResult HandlePlugsonGet(string key)
-        {
-            var config = LoadConfig();
-            var response = new JsonObject();
-            if (config.TryGetPropertyValue(key, out var valNode))
-            {
-                response[key] = valNode?.DeepClone();
-            }
-            else
-            {
-                response[key] = new JsonObject();
-            }
-            return Results.Json(response);
-        }
-
-        private static IResult HandlePlugsonSave(string key, JsonElement root)
-        {
-            var config = LoadConfig();
-            if (root.TryGetProperty(key, out var valElem))
-            {
-                var node = JsonNode.Parse(valElem.GetRawText());
-                config[key] = node;
-            }
-            else
-            {
-                var node = JsonNode.Parse(root.GetRawText()) as JsonObject;
-                if (node != null)
-                {
-                    node.Remove("method");
-                    node.Remove("token");
-
-                    if (node.TryGetPropertyValue("index", out var idxNode))
-                    {
-                        int idx = idxNode?.GetValue<int>() ?? 0;
-                        node.Remove("index");
-                        if (config.TryGetPropertyValue(key, out var arrNode) && arrNode is JsonArray arr && idx >= 0 && idx < arr.Count)
-                        {
-                            arr[idx] = node.DeepClone();
-                        }
-                    }
-                    else
-                    {
-                        config[key] = node.DeepClone();
-                    }
-                }
-            }
-            SaveConfig(config);
-            return Results.Json(new { result = "success" });
-        }
-
-        private static IResult HandlePlugsonAdd(string key, JsonElement root)
-        {
-            var config = LoadConfig();
-            if (!config.TryGetPropertyValue(key, out var arrNode) || arrNode is not JsonArray arr)
-            {
-                arr = new JsonArray();
-                config[key] = arr;
-            }
-
-            var item = JsonNode.Parse(root.GetRawText()) as JsonObject;
-            if (item != null)
-            {
-                item.Remove("method");
-                item.Remove("token");
-                arr.Add(item.DeepClone());
-            }
-
-            SaveConfig(config);
-            return Results.Json(new { result = "success" });
-        }
-
-        private static IResult HandlePlugsonDel(string key, JsonElement root)
-        {
-            var config = LoadConfig();
-            if (config.TryGetPropertyValue(key, out var arrNode) && arrNode is JsonArray arr)
-            {
-                if (root.TryGetProperty("index", out var idxElem) && idxElem.TryGetInt32(out int idx))
-                {
-                    if (idx >= 0 && idx < arr.Count)
-                    {
-                        arr.RemoveAt(idx);
-                        SaveConfig(config);
-                    }
-                }
-            }
-            return Results.Json(new { result = "success" });
-        }
-
-        private static IResult HandlePlugsonCheckExist(JsonElement root)
-        {
-            string relativePath = root.GetProperty("path").GetString() ?? string.Empty;
-            string mnt = string.IsNullOrEmpty(_plugsonMountPoint) ? "." : _plugsonMountPoint;
-            string fullPath = Path.Combine(mnt, relativePath.TrimStart('/'));
-            bool exists = File.Exists(fullPath) || Directory.Exists(fullPath);
-            return Results.Json(new { exist = exists ? 1 : 0 });
-        }
-
-        private static IResult HandlePlugsonHandshake()
-        {
-            var response = new JsonObject();
-            response["status"] = 0;
-            response["save_error"] = 0;
-
-            string[] pluginNames = { "control", "theme", "persistence", "auto_install", "menu_alias", "menu_tip", "menu_class", "auto_memdisk", "image_list", "password", "conf_replace", "dud", "injection", "hotkey" };
-            foreach (var name in pluginNames)
-            {
-                response[$"exist_{name}"] = new JsonArray { 1, 1, 1, 1 };
-            }
-            return Results.Json(response);
-        }
-
-        private static IResult GetPlugsonDeviceInfo()
-        {
-            string mnt = string.IsNullOrEmpty(_plugsonMountPoint) ? "." : _plugsonMountPoint;
-            string model = "Ventoy USB Partition";
-            string sizeStr = "Unknown Capacity";
-            string fsName = "exFAT";
-            int style = 0;
-            int secureBoot = 0;
-            string ver = GetVentoyVersion();
-
-            try
-            {
-                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                {
-                    if (mnt.Length >= 2 && mnt[1] == ':')
-                    {
-                        char letter = mnt[0];
-                        var driveInfo = new DriveInfo(letter.ToString());
-                        model = driveInfo.VolumeLabel + $" (Drive {letter}:)";
-                        sizeStr = FormatSize(driveInfo.TotalSize);
-                        fsName = driveInfo.DriveFormat;
-
-                        string volPath = $@"\\.\{letter}:";
-                        IntPtr hVol = Win32.CreateFile(volPath, Win32.GENERIC_READ, Win32.FILE_SHARE_READ | Win32.FILE_SHARE_WRITE, IntPtr.Zero, Win32.OPEN_EXISTING, 0, IntPtr.Zero);
-                        if (hVol != Win32.INVALID_HANDLE_VALUE)
-                        {
-                            Win32.VOLUME_DISK_EXTENTS extents = new Win32.VOLUME_DISK_EXTENTS();
-                            uint bytesReturned;
-                            bool success = Win32.DeviceIoControl(
-                                hVol,
-                                Win32.IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
-                                IntPtr.Zero, 0,
-                                ref extents,
-                                24,
-                                out bytesReturned,
-                                IntPtr.Zero);
-                            Win32.CloseHandle(hVol);
-
-                            if (success)
-                            {
-                                uint diskNum = extents.Extent.DiskNumber;
-                                var tempDisk = new DiskInfo { Name = $"PhysicalDrive{diskNum}" };
-                                DetectVentoyWindows(tempDisk, letter);
-                                style = tempDisk.VtoyPartStyle;
-                                secureBoot = tempDisk.VtoySecureBoot;
-                                ver = string.IsNullOrEmpty(tempDisk.VtoyVer) ? ver : tempDisk.VtoyVer;
-                            }
-                        }
-                    }
-                }
-                else
-                {
-                    string absMnt = Path.GetFullPath(mnt);
-                    string partitionDevice = string.Empty;
-                    var lines = File.ReadAllLines("/proc/mounts");
-                    foreach (var line in lines)
-                    {
-                        var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                        if (parts.Length >= 2 && Path.GetFullPath(parts[1]) == absMnt)
-                        {
-                            partitionDevice = parts[0];
-                            break;
-                        }
-                    }
-
-                    if (!string.IsNullOrEmpty(partitionDevice))
-                    {
-                        string resolved = partitionDevice;
-                        if (File.Exists(partitionDevice))
-                        {
-                            var target = File.ResolveLinkTarget(partitionDevice, true);
-                            if (target != null) resolved = target.FullName;
-                        }
-                        string partName = Path.GetFileName(resolved);
-
-                        string parentDir = Path.GetFullPath(Path.Combine($"/sys/class/block/{partName}", ".."));
-                        string diskName = Path.GetFileName(parentDir);
-
-                        var psi = new ProcessStartInfo("lsblk", $"-J -b -o NAME,MODEL,SIZE,FSTYPE /dev/{diskName}")
-                        {
-                            RedirectStandardOutput = true,
-                            UseShellExecute = false,
-                            CreateNoWindow = true
-                        };
-                        using (var proc = Process.Start(psi))
-                        {
-                            if (proc != null)
-                            {
-                                string output = proc.StandardOutput.ReadToEnd();
-                                proc.WaitForExit();
-                                using (var doc = JsonDocument.Parse(output))
-                                {
-                                    if (doc.RootElement.TryGetProperty("blockdevices", out var devices) && devices.GetArrayLength() > 0)
-                                    {
-                                        var dev = devices[0];
-                                        model = dev.TryGetProperty("model", out var mProp) ? mProp.GetString() ?? model : model;
-                                        long size = dev.GetProperty("size").GetInt64();
-                                        sizeStr = FormatSize(size);
-
-                                        if (dev.TryGetProperty("children", out var children))
-                                        {
-                                            foreach (var child in children.EnumerateArray())
-                                            {
-                                                if (child.GetProperty("name").GetString() == partName)
-                                                {
-                                                    fsName = child.TryGetProperty("fstype", out var fsProp) ? fsProp.GetString() ?? fsName : fsName;
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        var tempDisk = new DiskInfo { Name = diskName };
-                        DetectVentoy(tempDisk);
-                        style = tempDisk.VtoyPartStyle;
-                        secureBoot = tempDisk.VtoySecureBoot;
-                        ver = string.IsNullOrEmpty(tempDisk.VtoyVer) ? ver : tempDisk.VtoyVer;
-                    }
-                }
-            }
-            catch { }
-
-            return Results.Json(new
-            {
-                dev_name = model,
-                dev_capacity = sizeStr,
-                dev_fs = fsName,
-                ventoy_ver = ver,
-                part_style = style,
-                secure_boot = secureBoot
-            });
-        }
-
-        public static void Main(string[] args)
-        {
-            // Parse CLI arguments
-            string mode = "ventoy2disk"; // default mode
-            string hostIp = "127.0.0.1";
-            int port = 24680;
-
-            if (args.Length > 0 && args[0].StartsWith("-"))
-            {
-                // CLI mode compatibility with Ventoy2Disk.sh/VentoyWorker.sh
-                string cmd = args[0];
-                if (cmd == "-d")
-                {
-                    var disks = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? GetWindowsDisks(true) : GetLinuxDisks(true);
-                    Console.WriteLine("Devices List:");
-                    foreach (var d in disks)
-                    {
-                        Console.WriteLine($"  Device: {d.Name} ({d.Model}), Size: {d.HumanSize}, Ventoy: {(string.IsNullOrEmpty(d.VtoyVer) ? "None" : d.VtoyVer)}");
-                    }
-                    return;
-                }
-
-                string type = "";
-                if (cmd.Equals("-i", StringComparison.OrdinalIgnoreCase) || cmd.Equals("-I")) type = "install";
-                else if (cmd.Equals("-u", StringComparison.OrdinalIgnoreCase)) type = "update";
-                else if (cmd.Equals("-c", StringComparison.OrdinalIgnoreCase)) type = "clean";
-                else
-                {
-                    Console.WriteLine("Invalid command. Use -i, -I, -u, -c, or -d.");
-                    return;
-                }
-
-                if (args.Length < 2)
-                {
-                    Console.WriteLine("Missing disk device parameter.");
-                    return;
-                }
-
-                string disk = args[args.Length - 1];
-                if (disk.StartsWith("-"))
-                {
-                    Console.WriteLine("Missing disk device parameter.");
-                    return;
-                }
-
-                int style = 0; // MBR
-                int secureBoot = 0; // disabled
-                string reserveSpace = "0";
-                string fsType = "exfat";
-
-                for (int i = 1; i < args.Length - 1; i++)
-                {
-                    if (args[i] == "-g") style = 1;
-                    else if (args[i] == "-s") secureBoot = 1;
-                    else if (args[i] == "-r" && i + 1 < args.Length - 1)
-                    {
-                        if (long.TryParse(args[i + 1], out long rsvMb))
-                        {
-                            reserveSpace = (rsvMb * 1024 * 1024).ToString(); // convert MB to Bytes
-                        }
-                        i++;
-                    }
-                }
-
-                if (cmd == "-i" || cmd == "-c")
-                {
-                    Console.Write($"WARNING: All data on {disk} will be lost! Continue? (y/n): ");
-                    var response = Console.ReadLine();
-                    if (response == null || !response.Trim().Equals("y", StringComparison.OrdinalIgnoreCase))
-                    {
-                        Console.WriteLine("Aborted.");
-                        return;
-                    }
-                }
-
-                Console.WriteLine($"Starting {type} operation on {disk}...");
-                StartBackgroundOperation(type, disk, style, secureBoot, reserveSpace, fsType);
-
-                int lastPercent = -1;
-                while (true)
-                {
-                    int progressPercent;
-                    string res;
-                    lock (_progressLock)
-                    {
-                        progressPercent = _percent;
-                        res = _processResult;
-                    }
-                    if (progressPercent != lastPercent)
-                    {
-                        Console.Write($"\rProgress: {progressPercent}%   ");
-                        lastPercent = progressPercent;
-                    }
-                    if (progressPercent >= 100)
-                    {
-                        Console.WriteLine();
-                        Console.WriteLine(res == "success" ? "Operation completed successfully!" : "Operation failed.");
-                        break;
-                    }
-                    Thread.Sleep(200);
-                }
-                return;
-            }
-
-            if (args.Length > 0)
-            {
-                mode = args[0].ToLowerInvariant();
-            }
-            if (args.Length > 1)
-            {
-                hostIp = args[1];
-            }
-            if (args.Length > 2 && int.TryParse(args[2], out int p))
-            {
-                port = p;
-            }
-            if (args.Length > 3 && mode == "plugson")
-            {
-                _plugsonMountPoint = args[3];
-            }
-
-            if (mode != "ventoy2disk" && mode != "plugson")
-            {
-                Console.WriteLine("Usage: dotnet Ventoy2DiskDotNet.dll [ventoy2disk|plugson] [ip] [port] [mount_point]");
-                Console.WriteLine("Usage (CLI Mode): dotnet Ventoy2DiskDotNet.dll -i|-I|-u|-c|-d [options] <disk>");
-                return;
-            }
-
-            var builder = WebApplication.CreateBuilder(new string[0]);
-            builder.WebHost.UseUrls($"http://{hostIp}:{port}");
-            var app = builder.Build();
-
-            // Set static file mapping
-            string webDir = "";
-            if (mode == "plugson")
-            {
-                webDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "www");
-            }
-            else
-            {
-                webDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "wwwroot");
-            }
-
-            app.UseFileServer(new FileServerOptions
-            {
-                FileProvider = new PhysicalFileProvider(webDir),
-                RequestPath = "",
-                EnableDefaultFiles = true
-            });
-
-            // Endpoint for JSON POST handlers
-            app.MapPost("/vtoy/json", async (HttpContext context) =>
-            {
-                using (var reader = new StreamReader(context.Request.Body))
-                {
-                    var body = await reader.ReadToEndAsync();
-                    using (var doc = JsonDocument.Parse(body))
-                    {
-                        var root = doc.RootElement;
-                        string method = root.GetProperty("method").GetString() ?? string.Empty;
-
-                        if (method != "sysinfo")
-                        {
-                            string token = root.TryGetProperty("token", out var tProp) ? (tProp.GetString() ?? string.Empty) : string.Empty;
-                            if (token != _curServerToken)
-                            {
-                                return Results.Json(new { result = "token_error" });
-                            }
-                        }
-
-                        switch (method)
-                        {
-                            case "sysinfo":
-                                return Results.Json(new
-                                {
-                                    token = _curServerToken,
-                                    language = _curLanguage,
-                                    ventoy_ver = GetVentoyVersion(),
-                                    partstyle = _curPartStyle,
-                                    busy = _percent < 100,
-                                    process_disk = _processDisk,
-                                    process_type = _processType
-                                });
-
-                            case "sel_language":
-                                _curLanguage = root.GetProperty("language").GetString() ?? "en-US";
-                                return Results.Json(new { result = "success" });
-
-                            case "sel_partstyle":
-                                _curPartStyle = root.GetProperty("partstyle").GetInt32();
-                                return Results.Json(new { result = "success" });
-
-                            case "refresh_device":
-                                return Results.Json(new { result = "success" });
-
-                            case "get_dev_list":
-                                bool alldev = root.TryGetProperty("alldev", out var allProp) && allProp.GetUInt32() == 1;
-                                var disks = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? GetWindowsDisks(alldev) : GetLinuxDisks(alldev);
-                                return Results.Json(new
-                                {
-                                    list = disks.Select(d => new
-                                    {
-                                        name = d.Name,
-                                        model = d.Model,
-                                        size = d.HumanSize,
-                                        vtoy_valid = d.VtoyValid,
-                                        vtoy_ver = d.VtoyVer,
-                                        vtoy_secure_boot = d.VtoySecureBoot,
-                                        vtoy_partstyle = d.VtoyPartStyle
-                                    })
-                                });
-
-                            case "get_percent":
-                                lock (_progressLock)
-                                {
-                                    return Results.Json(new
-                                    {
-                                        result = _processResult,
-                                        process_disk = _processDisk,
-                                        process_type = _processType,
-                                        percent = _percent
-                                    });
-                                }
-
-                            case "install":
-                            case "update":
-                            case "clean":
-                                string diskName = root.GetProperty("disk").GetString() ?? string.Empty;
-                                int style = root.TryGetProperty("partstyle", out var styleProp) ? styleProp.GetInt32() : _curPartStyle;
-                                int secureBoot = root.TryGetProperty("secure_boot", out var sbProp) ? sbProp.GetInt32() : 0;
-                                string reserveSpace = root.TryGetProperty("reserve_space", out var rsvProp) ? (rsvProp.GetString() ?? "0") : "0";
-                                string fsType = root.TryGetProperty("fs", out var fsProp) ? (fsProp.GetString() ?? "exfat") : "exfat";
-
-                                StartBackgroundOperation(method, diskName, style, secureBoot, reserveSpace, fsType);
-                                return Results.Json(new { result = "success" });
-
-                            // PLUGSON Configurator Endpoints
-                            case "handshake":
-                                return HandlePlugsonHandshake();
-
-                            case "device_info":
-                                return GetPlugsonDeviceInfo();
-
-                            case "check_exist":
-                            case "check_exist2":
-                                return HandlePlugsonCheckExist(root);
-
-                            case string m when m.StartsWith("get_"):
-                                return HandlePlugsonGet(m.Substring(4));
-
-                            case string m when m.StartsWith("save_"):
-                                return HandlePlugsonSave(m.Substring(5), root);
-
-                            case string m when m.EndsWith("_add"):
-                                return HandlePlugsonAdd(m.Substring(0, m.Length - 4), root);
-
-                            case string m when m.EndsWith("_del"):
-                                return HandlePlugsonDel(m.Substring(0, m.Length - 4), root);
-
-                            default:
-                                return Results.Json(new { result = "invalid_method" });
-                        }
-                    }
-                }
-            });
-
-            Console.WriteLine("");
-            Console.WriteLine("===============================================================");
-            Console.WriteLine($"  Ventoy .NET Web GUI Server ({mode}) has started...");
-            Console.WriteLine($"  Please open your browser and visit: http://{hostIp}:{port}");
-            Console.WriteLine("===============================================================");
-            Console.WriteLine("");
-
-            app.Run();
         }
     }
 }
